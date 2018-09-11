@@ -333,3 +333,51 @@ void get_object_sample()
 
     get_oss_dir_to_local_dir();
 }
+
+void operate_bucket_sample()
+{
+    aos_pool_t *p = NULL;
+    aos_string_t bucket;
+    int is_cname = 0;
+    oss_request_options_t *options = NULL;
+    aos_table_t *resp_headers = NULL;
+    aos_status_t *s = NULL;
+    oss_list_buckets_params_t *params = NULL;
+    oss_list_bucket_content_t *content = NULL;
+
+    aos_pool_create(&p, NULL);
+    options = oss_request_options_create(p);
+    init_sample_request_options(options, is_cname);
+    aos_str_set(&bucket, BUCKET_NAME);
+
+    params = oss_create_list_buckets_params(p);
+    params->max_keys = 100;
+    s = oss_list_bucket(options, params, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("bucket is ");
+        aos_list_for_each_entry(oss_list_bucket_content_t, content, &params->bucket_list, node) {
+            printf("%s ", content->name.data);
+
+        }
+        printf("\r\nlistbucket success.\r\n");
+    } else {
+        printf("listbucket fail.\r\n");
+    }
+
+    s = oss_delete_bucket(options, &bucket, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("rmbucket %s success.\r\n", bucket.data);
+    } else {
+        printf("rmbucket %s fail.\r\n", bucket.data);
+    }
+
+    s = oss_create_bucket(options, &bucket, OSS_ACL_PRIVATE,
+                          &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("mkbucket %s success.\r\n", bucket.data);
+    } else {
+        printf("mkbucket %s fail.\r\n", bucket.data);
+    }
+
+    aos_pool_destroy(p);
+}

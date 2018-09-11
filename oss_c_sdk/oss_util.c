@@ -4,6 +4,7 @@
 #include "aos_status.h"
 #include "oss_auth.h"
 #include "oss_util.h"
+#include "c-sdk/qiniu/rs.h"
 
 #ifndef WIN32
 #include<sys/socket.h>
@@ -12,6 +13,8 @@
 #endif
 
 static char *default_content_type = "application/octet-stream";
+
+static char *pHexTable = "0123456789abcdef";
 
 static oss_content_type_t file_type[] = {
     {"html", "text/html"},
@@ -815,6 +818,82 @@ void oss_init_object_request(const oss_request_options_t *options,
     }
 
     oss_get_object_uri(options, bucket, object, *req);
+}
+
+void kodo_Encode_Bucket_To_HexString(const aos_string_t *bucket, char *pcEncString)
+{
+    int i = 0;
+    int length = bucket->len;
+    char cByte;
+    for (i = 0; i < length; i++) {
+        cByte = bucket->data[i];
+        pcEncString[i*2] = pHexTable[cByte>>4];
+        pcEncString[i*2+1] = pHexTable[cByte&0x0f];
+    }
+
+    return;
+}
+
+void kodo_init_object_request(const oss_request_options_t *options,
+                             const aos_string_t *bucket,
+                             const aos_string_t *object,
+                             http_method_e method,
+                             aos_http_request_t **req,
+                             aos_table_t *params,
+                             aos_table_t *headers,
+                             aos_http_response_t **resp)
+{
+    char   *domain      = NULL;
+    char   *baseUrl     = NULL;
+    char   *hostPrefix  = NULL;
+    char   *pcEncString = NULL;
+    char   *privateURL  = NULL;
+    int     tokenlen    = 0;
+    int     remainLen   = 0;
+    Qiniu_RS_GetPolicy getPolicy;
+    Qiniu_Mac mac;
+
+    oss_init_request(options, method, req, params, headers, resp);
+    (*resp)->progress_callback = NULL;
+    oss_get_object_uri(options, bucket, object, *req);
+
+    pcEncString = (char *)malloc(2 * bucket->len);
+    if (NULL == pcEncString) {
+        aos_error_log("Not enough memory, malloc fail.\r\n");
+        return;
+    }
+
+    kodo_Encode_Bucket_To_HexString(bucket, pcEncString);
+    domain = apr_psprintf(options->pool, "%.*s-%.*s.%.*s.%s",
+                          2 * bucket->len, pcEncString,
+                          options->config->access_key_id.len, options->config->access_key_id.data,
+                          options->config->zone.len, options->config->zone.data,
+                          "src.qbox.me");
+
+    Qiniu_Zero(getPolicy);
+    hostPrefix = starts_with(&options->config->io_host, AOS_HTTP_PREFIX) ?
+                             AOS_HTTP_PREFIX : "";
+    hostPrefix = starts_with(&options->config->io_host, AOS_HTTPS_PREFIX) ?
+                             AOS_HTTPS_PREFIX : "";
+
+    baseUrl = Qiniu_String_Concat(hostPrefix, domain, "/", object->data, NULL);
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+    privateURL = Qiniu_RS_GetPolicy_MakeRequest(&getPolicy, baseUrl, &mac);
+    tokenlen = strlen(hostPrefix) + strlen(domain);
+    remainLen = strlen(privateURL) - tokenlen;
+
+    (*req)->signed_url = apr_psprintf(options->pool, "%.*s%.*s",
+                                      options->config->io_host.len, options->config->io_host.data,
+                                      remainLen, privateURL + tokenlen);
+
+    apr_table_addn((*req)->headers, "host", domain);
+
+    free(pcEncString);
+    free(baseUrl);
+    free(privateURL);
+
+    return;
 }
 
 void oss_init_live_channel_request(const oss_request_options_t *options, 

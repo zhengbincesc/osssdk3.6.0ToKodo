@@ -85,6 +85,15 @@ void oss_init_object_request(const oss_request_options_t *options, const aos_str
         aos_table_t *params, aos_table_t *headers, oss_progress_callback cb, uint64_t initcrc,
         aos_http_response_t **resp);
 
+void kodo_init_object_request(const oss_request_options_t *options,
+                             const aos_string_t *bucket,
+                             const aos_string_t *object,
+                             http_method_e method,
+                             aos_http_request_t **req,
+                             aos_table_t *params,
+                             aos_table_t *headers,
+                             aos_http_response_t **resp);
+
 /**
   * @brief  init oss live channel request
 **/

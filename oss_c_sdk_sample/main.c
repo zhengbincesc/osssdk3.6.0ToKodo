@@ -21,6 +21,10 @@ extern void crc_sample();
 extern void image_sample();
 extern void resumable_upload_sample();
 extern void resumable_download_sample();
+extern void put_object_from_file();
+extern void get_object_to_local_file();
+extern void delete_object();
+extern void operate_bucket_sample();
 
 int main(int argc, char *argv[])
 {
@@ -28,6 +32,7 @@ int main(int argc, char *argv[])
         exit(1);
     }
 
+    /*
     put_object_sample();
     append_object_sample();
     get_object_sample();
@@ -41,6 +46,12 @@ int main(int argc, char *argv[])
     image_sample();
     resumable_upload_sample();
     resumable_download_sample();
+    operate_bucket_sample(); */
+    
+    operate_bucket_sample();
+    get_object_to_local_file();
+    delete_object();
+    put_object_from_file();
 
     aos_http_io_deinitialize();
 

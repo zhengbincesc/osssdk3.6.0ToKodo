@@ -41,6 +41,8 @@ aos_status_t *aos_status_dup(aos_pool_t *p, aos_status_t *src);
 
 aos_status_t *aos_status_parse_from_body(aos_pool_t *p, aos_list_t *bc, int code, aos_status_t *s);
 
+aos_status_t *oss_transfer_err_to_aos(aos_pool_t *pool, int code, const char *message);
+
 extern const char AOS_XML_PARSE_ERROR_CODE[];
 extern const char AOS_OPEN_FILE_ERROR_CODE[];
 extern const char AOS_WRITE_FILE_ERROR_CODE[];

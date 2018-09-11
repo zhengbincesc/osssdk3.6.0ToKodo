@@ -7,6 +7,9 @@
 #include "oss_util.h"
 #include "oss_xml.h"
 #include "oss_api.h"
+#include "c-sdk/qiniu/http.h"
+#include "c-sdk/cJSON/cJSON.h"
+
 
 static aos_status_t *oss_create_bucket_with_params(const oss_request_options_t *options, 
                                                    const aos_string_t *bucket, 
@@ -51,15 +54,37 @@ aos_status_t *oss_create_bucket(const oss_request_options_t *options,
                                 oss_acl_e oss_acl, 
                                 aos_table_t **resp_headers)
 {
-    aos_status_t *s = NULL;
-    oss_create_bucket_params_t params;
-    params.acl = oss_acl;
-    params.storage_class = OSS_STORAGE_CLASS_BUTT;
-    
-    s = oss_create_bucket_with_params(options, 
-                                bucket, 
-                                &params, 
-                                resp_headers);
+    char         *encBucket = NULL;
+    aos_status_t *s         = NULL;
+    char         *url       = NULL;
+    Qiniu_Error   err;
+    Qiniu_Client  client;
+    Qiniu_Mac     mac;
+
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    encBucket = Qiniu_String_Encode(bucket->data);
+
+    url = Qiniu_String_Concat(options->config->rs_host.data, "/mkbucketv2/", encBucket, NULL);
+    err = Qiniu_Client_CallNoRet(&client, url);
+
+    //cesc If oss acl is private, create private bucket, else create public bucket
+    if ((OSS_ACL_PRIVATE == oss_acl) && (200 == err.code)) {
+        Qiniu_Free(url);
+        Qiniu_Client_Cleanup(&client);
+
+        Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+        url = Qiniu_String_Concat(options->config->uc_host.data, "/private?bucket=", bucket->data, "&private=1", NULL);
+        err = Qiniu_Client_CallNoRet(&client, url);
+    }
+
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+
+    Qiniu_Free(url);
+    Qiniu_Free(encBucket);
+    Qiniu_Client_Cleanup(&client);
+
     return s;
 }
 
@@ -85,20 +110,22 @@ aos_status_t *oss_delete_bucket(const oss_request_options_t *options,
                                 const aos_string_t *bucket, 
                                 aos_table_t **resp_headers)
 {
-    aos_status_t *s = NULL;
-    aos_http_request_t *req = NULL;
-    aos_http_response_t *resp = NULL;
-    aos_table_t *query_params = NULL;
-    aos_table_t *headers = NULL;
+    aos_status_t *s   = NULL;
+    char         *url = NULL;
+    Qiniu_Error   err;
+    Qiniu_Client  client;
+    Qiniu_Mac     mac;
 
-    headers = aos_table_create_if_null(options, headers, 0);
-    query_params = aos_table_create_if_null(options, query_params, 0);
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    url = Qiniu_String_Concat3(options->config->rs_host.data, "/drop/", bucket->data);
+    err = Qiniu_Client_CallNoRet(&client, url);
+    Qiniu_Free(url);
 
-    oss_init_bucket_request(options, bucket, HTTP_DELETE, &req, 
-                            query_params, headers, &resp);
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
 
-    s = oss_process_request(options, req, resp);
-    oss_fill_read_response_header(resp, resp_headers);
+    Qiniu_Client_Cleanup(&client);
 
     return s;
 }
@@ -436,44 +463,47 @@ aos_status_t *oss_list_bucket(const oss_request_options_t *options,
                               oss_list_buckets_params_t *params, 
                               aos_table_t **resp_headers)
 {
-    int res;
-    aos_status_t *s = NULL;
-    aos_http_request_t *req = NULL;
-    aos_http_response_t *resp = NULL;
-    aos_table_t *query_params = NULL;
-    aos_table_t *headers = NULL;
+    aos_status_t   *s           = NULL;
+    cJSON          *root        = NULL;
+    char           *bucket      = NULL;
+    char           *value       = NULL;
+    int             bucketCount = 0;
+    Qiniu_Error     err;
+    Qiniu_Client    client;
+    Qiniu_Mac       mac;
+    int             i;
+    oss_list_bucket_content_t *content;
 
-    //init query_params
-    query_params = aos_table_create_if_null(options, query_params, 3);
-    if (params->prefix.len) {
-        apr_table_add(query_params, OSS_PREFIX, params->prefix.data);
+    //cesc TODO: resp_headers, all interface?
+    /* cesc kodo does not support prefix, marker, ax-keys, so just return all buckets
+    owner_id, owner_name,CreationDate, ExtranetEndpoint, IntranetEndpoint, Location, StorageClass does not support too  */
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    char *url = Qiniu_String_Concat2(options->config->rs_host.data, "/buckets");
+    err = Qiniu_Client_Call(&client, &root, url);
+    Qiniu_Free(url);
+
+    if (aos_http_is_ok(err.code)) {
+        params->truncated = 0;  //we just return all buckets, so this is 0(not truncated)
+        bucketCount = cJSON_GetArraySize(root);
+        for (i = 0; i < bucketCount; i++) {
+            bucket = cJSON_GetArrayItem(root, i)->valuestring;
+            content = oss_create_list_bucket_content(options->pool);
+            if (NULL == content) {
+                aos_error_log("malloc memory for list bucket failed");
+                break;
+            }
+            value = apr_pstrdup(options->pool, bucket);
+            aos_str_set(&content->name, value);
+            aos_list_add_tail(&content->node, &params->bucket_list);
+        }
     }
 
-    if (params->marker.len) {
-        apr_table_add(query_params, OSS_MARKER, params->marker.data);
-    }
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
 
-    if (params->max_keys) {
-        aos_table_add_int(query_params, OSS_MAX_KEYS, params->max_keys);
-    }
-    
-    //init headers
-    headers = aos_table_create_if_null(options, headers, 0);
-
-    oss_init_service_request(options, HTTP_GET, &req, 
-                            query_params, headers, &resp);
-
-    s = oss_process_request(options, req, resp);
-    oss_fill_read_response_header(resp, resp_headers);
-    if (!aos_status_is_ok(s)) {
-        return s;
-    }
-
-    res = oss_list_buckets_parse_from_body(options->pool, &resp->body, 
-            params);
-    if (res != AOSE_OK) {
-        aos_xml_error_status_set(s, res);
-    }
+    Qiniu_Client_Cleanup(&client);
 
     return s;
 }
