@@ -8,6 +8,7 @@
 #include "oss_api.h"
 #include "c-sdk/qiniu/io.h"
 #include "c-sdk/qiniu/rs.h"
+#include "c-sdk/cJSON/cJSON.h"
 
 char *oss_gen_signed_url(const oss_request_options_t *options,
                          const aos_string_t *bucket, 
@@ -230,6 +231,131 @@ aos_status_t *oss_restore_object(const oss_request_options_t *options,
 
     s = oss_process_request(options, req, resp);
     oss_fill_read_response_header(resp, resp_headers);
+
+    return s;
+}
+
+aos_status_t *oss_get_object_address(const oss_request_options_t *options,
+                                     const aos_string_t *bucket,
+                                     const aos_string_t *object,
+                                     aos_string_t *objectAddress,
+                                     int timeout,
+                                     aos_table_t **resp_headers)
+{
+    //cesc TODO: need to config EncodeURI, look at service.go/GetObject
+    aos_status_t      *s           = NULL;
+    char              *EncodeURI   = "cesc:haha";
+    const char        *privateURL  = NULL;
+    char              *getdomain   = NULL;
+    Qiniu_Json        *root        = NULL;
+    char               asTimeout[10];
+    Qiniu_Error        err;
+    Qiniu_Mac          mac;
+    Qiniu_Client       client;
+
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+
+    //timeout should be between 1 and 3600
+    if ((timeout < 1) || (timeout > 3600)) {
+        s = aos_status_create(options->pool);
+        aos_status_set(s, AOSE_INVALID_ARGUMENT, "timeout should be between 1 and 3600", NULL);
+        return s;
+    }
+
+    sprintf(asTimeout, "%u", (unsigned int)timeout);
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    getdomain = Qiniu_String_Concat(options->config->rs_host.data, "/get/", EncodeURI,
+                                    "/expires/", asTimeout, NULL);
+    err = Qiniu_Client_Call(&client, &root, getdomain);
+    if (aos_http_is_ok(err.code)) {
+        privateURL = Qiniu_Json_GetString(root, "url", "");
+        aos_str_set(objectAddress, apr_pstrdup(options->pool, privateURL));
+    }
+
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+
+    Qiniu_Free(getdomain);
+    Qiniu_Client_Cleanup(&client);
+
+    return s;
+}
+
+aos_status_t *oss_get_object_address_usedomain(const oss_request_options_t *options,
+                                     const aos_string_t *bucket,
+                                     const aos_string_t *object,
+                                     aos_string_t *objectAddress,
+                                     int timeout,
+                                     aos_table_t **resp_headers)
+{
+    aos_status_t      *s           = NULL;
+    char              *baseUrl     = NULL;
+    char              *privateURL  = NULL;
+    char              *domainUrl   = NULL;
+    const char        *domain      = NULL;
+    int                domainCount = 0;
+    Qiniu_Json        *root        = NULL;
+    Qiniu_Json        *item        = NULL;
+    Qiniu_Error        err;
+    Qiniu_Mac          mac;
+    Qiniu_RS_GetPolicy getPolicy;
+    Qiniu_Client       client;
+
+
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+
+    //timeout should be between 1 and 3600
+    if ((timeout < 1) || (timeout > 3600)) {
+        s = aos_status_create(options->pool);
+        aos_status_set(s, AOSE_INVALID_ARGUMENT, "timeout should be between 1 and 3600", NULL);
+        return s;
+    }
+
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    domainUrl = Qiniu_String_Concat3("https://api.qiniu.com", "/v7/domain/list?tbl=", bucket->data);
+    err = Qiniu_Client_Call(&client, &root, domainUrl);
+
+    if (aos_http_is_ok(err.code)) {
+        domainCount = cJSON_GetArraySize(root);
+        if (0 == domainCount) {
+            Qiniu_Free(domainUrl);
+            Qiniu_Client_Cleanup(&client);
+            s = aos_status_create(options->pool);
+            aos_status_set(s, AOSE_INVALID_ARGUMENT, "need config at least one domain", NULL);
+            return s;
+        }
+        item = cJSON_GetArrayItem(root, 0);
+        //just get first domain
+        domain = Qiniu_Json_GetString(item, "domain", NULL);
+        //cesc TODO: domain not exist, which one?
+        if (NULL == domain) {
+            Qiniu_Free(domainUrl);
+            Qiniu_Client_Cleanup(&client);
+            s = aos_status_create(options->pool);
+            aos_status_set(s, AOSE_SERVICE_ERROR, "need config at least one domain", NULL);
+            return s;
+        }
+    } else {
+        Qiniu_Free(domainUrl);
+        Qiniu_Client_Cleanup(&client);
+        return oss_transfer_err_to_aos(options->pool, err.code, err.message);
+    }
+
+    Qiniu_Zero(getPolicy);
+    getPolicy.expires = timeout;
+    baseUrl = Qiniu_String_Concat("http://", domain, "/", object->data, NULL);
+    privateURL = Qiniu_RS_GetPolicy_MakeRequest(&getPolicy, baseUrl, &mac);
+
+    aos_str_set(objectAddress, apr_pstrdup(options->pool, privateURL));
+
+    s = aos_status_create(options->pool);
+    s->code = 200;
+
+    Qiniu_Free(domainUrl);
+    Qiniu_Client_Cleanup(&client);
+    Qiniu_Free(baseUrl);
+    Qiniu_Free(privateURL);
 
     return s;
 }

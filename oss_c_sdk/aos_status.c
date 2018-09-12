@@ -113,9 +113,10 @@ aos_status_t *oss_transfer_err_to_aos(aos_pool_t *pool, int code, const char *me
     s->code = code;
     s->error_code = NULL;
     s->error_msg = NULL;
-    if (NULL != message) {
-        //cesc TODO: error_code? error_message?
-        s->error_msg = apr_psprintf(pool, "%s", message);
+    if (!aos_http_is_ok(code) && (NULL != message)) {
+        //cesc kodo just have http code & message, both set error_code & error_msg to message
+        s->error_code = apr_pstrdup(pool, message);
+        s->error_msg = apr_pstrdup(pool, message);
     }
 
     return s;

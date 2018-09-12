@@ -10,6 +10,7 @@
 #include "c-sdk/qiniu/http.h"
 #include "c-sdk/cJSON/cJSON.h"
 
+#define KODO_BUCKET_NOT_FOUND_CODE 612
 
 static aos_status_t *oss_create_bucket_with_params(const oss_request_options_t *options, 
                                                    const aos_string_t *bucket, 
@@ -135,29 +136,31 @@ aos_status_t *oss_put_bucket_acl(const oss_request_options_t *options,
                                  oss_acl_e oss_acl,
                                  aos_table_t **resp_headers)
 {
-    aos_status_t *s = NULL;
-    aos_http_request_t *req = NULL;
-    aos_http_response_t *resp = NULL;
-    aos_table_t *query_params = NULL;
-    aos_table_t *headers = NULL;
-    const char *oss_acl_str = NULL;
+    aos_status_t *s         = NULL;
+    char         *url       = NULL;
+    char         *private   = "0";
+    Qiniu_Error   err;
+    Qiniu_Client  client;
+    Qiniu_Mac     mac;
 
-    query_params = aos_table_create_if_null(options, query_params, 1);
-    apr_table_add(query_params, OSS_ACL, "");
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
 
-    headers = aos_table_create_if_null(options, headers, 1);
-    oss_acl_str = get_oss_acl_str(oss_acl);
-    if (oss_acl_str) {
-        apr_table_set(headers, OSS_CANNONICALIZED_HEADER_ACL, oss_acl_str);
+    //cesc If oss acl is private, set private bucket, else set public bucket
+    if (OSS_ACL_PRIVATE == oss_acl) {
+        private = "1";
     }
 
-    oss_init_bucket_request(options, bucket, HTTP_PUT, &req, 
-                            query_params, headers, &resp);
+    url = Qiniu_String_Concat(options->config->uc_host.data, "/private?bucket=", bucket->data, "&private=", private,  NULL);
+    err = Qiniu_Client_CallNoRet(&client, url);
+    //cesc TODO: bucket not exist, this will be ok?
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
 
-    s = oss_process_request(options, req, resp);
-    oss_fill_read_response_header(resp, resp_headers);
+    Qiniu_Free(url);
+    Qiniu_Client_Cleanup(&client);
 
-    return s;    
+    return s;
 }
 
 aos_status_t *oss_get_bucket_acl(const oss_request_options_t *options, 
@@ -165,31 +168,68 @@ aos_status_t *oss_get_bucket_acl(const oss_request_options_t *options,
                                  aos_string_t *oss_acl, 
                                  aos_table_t **resp_headers)
 {
-    aos_status_t *s = NULL;
-    int res;
-    aos_http_request_t *req = NULL;
-    aos_http_response_t *resp = NULL;
-    aos_table_t *query_params = NULL;
-    aos_table_t *headers = NULL;
+    aos_status_t   *s         = NULL;
+    Qiniu_Json     *root      = NULL;
+    char           *url       = NULL;
+    char           *pacl      = "public-read-write";
+    Qiniu_Error     err;
+    Qiniu_Client    client;
+    Qiniu_Mac       mac;
 
-    query_params = aos_table_create_if_null(options, query_params, 1);
-    apr_table_add(query_params, OSS_ACL, "");
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
 
-    headers = aos_table_create_if_null(options, headers, 0);    
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    url = Qiniu_String_Concat3(options->config->uc_host.data, "/v2/bucketInfo?bucket=", bucket->data);
+    err = Qiniu_Client_Call(&client, &root, url);
 
-    oss_init_bucket_request(options, bucket, HTTP_GET, &req, 
-                            query_params, headers, &resp);
-
-    s = oss_process_request(options, req, resp);
-    oss_fill_read_response_header(resp, resp_headers);
-    if (!aos_status_is_ok(s)) {
-        return s;
+    if (aos_http_is_ok(err.code)) {
+        //cesc If bucket is private,return private. else return public-read-write
+        if (1 == Qiniu_Json_GetInt(root, "private", 0)) {
+            pacl = "private";
+        }
+        aos_str_set(oss_acl, apr_pstrdup(options->pool, pacl));
     }
 
-    res = oss_acl_parse_from_body(options->pool, &resp->body, oss_acl);
-    if (res != AOSE_OK) {
-        aos_xml_error_status_set(s, res);
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+
+    Qiniu_Free(url);
+    Qiniu_Client_Cleanup(&client);
+
+    return s;
+}
+
+aos_status_t *oss_check_bucket(const oss_request_options_t *options,
+                               const aos_string_t *bucket,
+                               int *pIsExist,
+                               aos_table_t **resp_headers)
+{
+    aos_status_t   *s        = NULL;
+    Qiniu_Json     *root     = NULL;
+    char           *url      = NULL;
+    Qiniu_Error     err;
+    Qiniu_Client    client;
+    Qiniu_Mac       mac;
+
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    url = Qiniu_String_Concat3(options->config->uc_host.data, "/v2/bucketInfo?bucket=", bucket->data);
+    err = Qiniu_Client_Call(&client, &root, url);
+
+    *pIsExist = 0;
+    if (aos_http_is_ok(err.code)) {
+        *pIsExist = 1;
+    } else if (KODO_BUCKET_NOT_FOUND_CODE == err.code) {
+        //If code is not found, reset code to 200
+        err.code = 200;
     }
+
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+
+    Qiniu_Free(url);
+    Qiniu_Client_Cleanup(&client);
 
     return s;
 }
@@ -258,31 +298,39 @@ aos_status_t *oss_get_bucket_info(const oss_request_options_t *options,
                                   oss_bucket_info_t *bucket_info, 
                                   aos_table_t **resp_headers)
 {
-    aos_status_t *s = NULL;
-    int res;
-    aos_http_request_t *req = NULL;
-    aos_http_response_t *resp = NULL;
-    aos_table_t *query_params = NULL;
-    aos_table_t *headers = NULL;
+    aos_status_t   *s         = NULL;
+    Qiniu_Json     *root      = NULL;
+    char           *url       = NULL;
+    const char     *location  = NULL;
+    char           *pacl      = "public-read-write";
+    Qiniu_Error     err;
+    Qiniu_Client    client;
+    Qiniu_Mac       mac;
 
-    query_params = aos_table_create_if_null(options, query_params, 1);
-    apr_table_add(query_params, OSS_BUCKETINFO, "");
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
 
-    headers = aos_table_create_if_null(options, headers, 0);    
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    url = Qiniu_String_Concat3(options->config->uc_host.data, "/v2/bucketInfo?bucket=", bucket->data);
+    err = Qiniu_Client_Call(&client, &root, url);
+    //cesc TODO: how to set created_date, extranet_endpoint, intranet_endpoint, location, owner_name, owner_id?
+    //v2/buckets?
+    if (aos_http_is_ok(err.code)) {
+        //cesc If bucket is private,return private. else return public-read-write
+        if (1 == Qiniu_Json_GetInt(root, "private", 0)) {
+            pacl = "private";
+        }
+        aos_str_set(&bucket_info->acl, apr_pstrdup(options->pool, pacl));
+        location = Qiniu_Json_GetString(root, "region", "");
+        aos_str_set(&bucket_info->location, apr_pstrdup(options->pool, location));
 
-    oss_init_bucket_request(options, bucket, HTTP_GET, &req, 
-                            query_params, headers, &resp);
-
-    s = oss_process_request(options, req, resp);
-    oss_fill_read_response_header(resp, resp_headers);
-    if (!aos_status_is_ok(s)) {
-        return s;
+        printf("location is %s, response body is %s\r\n", location, Qiniu_Buffer_CStr(&client.b));
     }
 
-    res = oss_get_bucket_info_parse_from_body(options->pool, &resp->body, bucket_info);
-    if (res != AOSE_OK) {
-        aos_xml_error_status_set(s, res);
-    }
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+
+    Qiniu_Free(url);
+    Qiniu_Client_Cleanup(&client);
 
     return s;
 }
@@ -750,6 +798,7 @@ aos_status_t *oss_put_bucket_website(const oss_request_options_t *options,
                                      oss_website_config_t *website_config,
                                      aos_table_t **resp_headers)
 {
+    //cesc TODO: achieve this
     aos_status_t *s = NULL;
     aos_http_request_t *req = NULL;
     aos_http_response_t *resp = NULL;
@@ -780,6 +829,7 @@ aos_status_t *oss_get_bucket_website(const oss_request_options_t *options,
                                      oss_website_config_t *website_config, 
                                      aos_table_t **resp_headers)
 {
+    //cesc TODO: achieve this
     aos_status_t *s = NULL;
     int res;
     aos_http_request_t *req = NULL;

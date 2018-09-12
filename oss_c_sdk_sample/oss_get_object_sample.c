@@ -188,6 +188,36 @@ void get_object_to_local_file_with_range()
     aos_pool_destroy(p);
 }
 
+void get_object_address()
+{
+    aos_pool_t *p = NULL;
+    aos_string_t bucket;
+    aos_string_t object;
+    aos_string_t objectAddress;
+    int is_cname = 0;
+    aos_table_t *resp_headers = NULL;
+    oss_request_options_t *options = NULL;
+    aos_status_t *s = NULL;
+
+    aos_pool_create(&p, NULL);
+
+    options = oss_request_options_create(p);
+    init_sample_request_options(options, is_cname);
+
+    // set value
+    aos_str_set(&bucket, BUCKET_NAME);
+    aos_str_set(&object, OBJECT_NAME);
+
+    s = oss_get_object_address(options, &bucket, &object, &objectAddress, 60, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("get object address succeeded, address is %s\r\n", objectAddress.data);
+    } else {
+        printf("get object address failed\r\n");
+    }
+
+    aos_pool_destroy(p);
+}
+
 void get_object_by_signed_url()
 {
     aos_pool_t *p = NULL;
@@ -344,11 +374,56 @@ void operate_bucket_sample()
     aos_status_t *s = NULL;
     oss_list_buckets_params_t *params = NULL;
     oss_list_bucket_content_t *content = NULL;
+    aos_string_t oss_acl;
+    int isExist = 0;
+    oss_bucket_info_t bucket_info;
 
     aos_pool_create(&p, NULL);
     options = oss_request_options_create(p);
     init_sample_request_options(options, is_cname);
     aos_str_set(&bucket, BUCKET_NAME);
+
+    s = oss_put_bucket_acl(options, &bucket, OSS_ACL_PRIVATE, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("put bucket %s acl private success.\r\n", bucket.data);
+    } else {
+        printf("put bucket %s acl private failed.\r\n", bucket.data);
+    }
+
+    s = oss_get_bucket_acl(options, &bucket, &oss_acl, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("get bucket %s acl success, acl is %s\r\n", bucket.data, oss_acl.data);
+    } else {
+        printf("get bucket %s acl failed.\r\n", bucket.data);
+    }
+
+    s = oss_put_bucket_acl(options, &bucket, OSS_ACL_PUBLIC_READ, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("put bucket %s acl public success.\r\n", bucket.data);
+    } else {
+        printf("put bucket %s acl public failed.\r\n", bucket.data);
+    }
+
+    s = oss_get_bucket_acl(options, &bucket, &oss_acl, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("get bucket %s acl success, acl is %s\r\n", bucket.data, oss_acl.data);
+    } else {
+        printf("get bucket %s acl failed.\r\n", bucket.data);
+    }
+
+    s = oss_check_bucket(options, &bucket, &isExist, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("check bucket %s success, isExist is %d\r\n", bucket.data, isExist);
+    } else {
+        printf("check bucket %s failed.\r\n", bucket.data);
+    }
+
+    s = oss_get_bucket_info(options, &bucket, &bucket_info, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("get bucket %s info success\r\n", bucket.data);
+    } else {
+        printf("get bucket %s info failed.\r\n", bucket.data);
+    }
 
     params = oss_create_list_buckets_params(p);
     params->max_keys = 100;
