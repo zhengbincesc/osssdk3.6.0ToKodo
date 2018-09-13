@@ -855,28 +855,25 @@ aos_status_t *oss_put_bucket_website(const oss_request_options_t *options,
                                      oss_website_config_t *website_config,
                                      aos_table_t **resp_headers)
 {
-    //cesc TODO: achieve this
-    aos_status_t *s = NULL;
-    aos_http_request_t *req = NULL;
-    aos_http_response_t *resp = NULL;
-    apr_table_t *query_params = NULL;
-    aos_table_t *headers = NULL;
-    aos_list_t body;
+    //cesc TODO: put bucket && get bucket need discuss
+    //website_config suffix_str, key_str does not make sense, index.html,index.htm,error_404
+    aos_status_t *s         = NULL;
+    char         *url       = NULL;
+    Qiniu_Error   err;
+    Qiniu_Client  client;
+    Qiniu_Mac     mac;
 
-    //init query_params
-    query_params = aos_table_create_if_null(options, query_params, 1);
-    apr_table_add(query_params, OSS_WEBSITE, "");
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
 
-    //init headers
-    headers = aos_table_create_if_null(options, headers, 0);
+    url = Qiniu_String_Concat(options->config->uc_host.data, "/noIndexPage?bucket=", bucket->data, "&noIndexPage=0", NULL);
+    err = Qiniu_Client_CallNoRet(&client, url);
 
-    oss_init_bucket_request(options, bucket, HTTP_PUT, &req, 
-                            query_params, headers, &resp);
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
 
-    build_website_config_body(options->pool, website_config, &body);
-    oss_write_request_body_from_buffer(&body, req);
-    s = oss_process_request(options, req, resp);
-    oss_fill_read_response_header(resp, resp_headers);
+    Qiniu_Free(url);
+    Qiniu_Client_Cleanup(&client);
 
     return s;
 }
@@ -886,32 +883,30 @@ aos_status_t *oss_get_bucket_website(const oss_request_options_t *options,
                                      oss_website_config_t *website_config, 
                                      aos_table_t **resp_headers)
 {
-    //cesc TODO: achieve this
-    aos_status_t *s = NULL;
-    int res;
-    aos_http_request_t *req = NULL;
-    aos_http_response_t *resp = NULL;
-    aos_table_t *query_params = NULL;
-    aos_table_t *headers = NULL;
+    aos_status_t   *s         = NULL;
+    Qiniu_Json     *root      = NULL;
+    char           *url       = NULL;
+    Qiniu_Error     err;
+    Qiniu_Client    client;
+    Qiniu_Mac       mac;
 
-    query_params = aos_table_create_if_null(options, query_params, 1);
-    apr_table_add(query_params, OSS_WEBSITE, "");
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
 
-    headers = aos_table_create_if_null(options, headers, 0);    
-
-    oss_init_bucket_request(options, bucket, HTTP_GET, &req, 
-                            query_params, headers, &resp);
-
-    s = oss_process_request(options, req, resp);
-    oss_fill_read_response_header(resp, resp_headers);
-    if (!aos_status_is_ok(s)) {
-        return s;
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    url = Qiniu_String_Concat3(options->config->uc_host.data, "/v2/bucketInfo?bucket=", bucket->data);
+    err = Qiniu_Client_Call(&client, &root, url);
+    if (aos_http_is_ok(err.code)) {
+        if (0 == Qiniu_Json_GetInt(root, "no_index_page", 0)) {
+            aos_str_set(&website_config->suffix_str, apr_pstrdup(options->pool, "index.html"));
+            aos_str_set(&website_config->key_str, apr_pstrdup(options->pool, "error-404"));
+        }
     }
 
-    res = oss_get_bucket_website_parse_from_body(options->pool, &resp->body, website_config);
-    if (res != AOSE_OK) {
-        aos_xml_error_status_set(s, res);
-    }
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+
+    Qiniu_Free(url);
+    Qiniu_Client_Cleanup(&client);
 
     return s;
 }

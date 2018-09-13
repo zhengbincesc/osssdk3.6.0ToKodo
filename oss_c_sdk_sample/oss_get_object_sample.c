@@ -197,7 +197,7 @@ void get_object_address()
     int is_cname = 0;
     aos_table_t *resp_headers = NULL;
     oss_request_options_t *options = NULL;
-    aos_status_t *s = NULL;
+    aos_status_t *s = NULL;  
 
     aos_pool_create(&p, NULL);
 
@@ -382,6 +382,22 @@ void operate_bucket_sample()
     options = oss_request_options_create(p);
     init_sample_request_options(options, is_cname);
     aos_str_set(&bucket, BUCKET_NAME);
+    oss_website_config_t website_config;
+
+    s = oss_put_bucket_website(options, &bucket, &website_config, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("put bucket %s weisite success\r\n", bucket.data);
+    } else {
+        printf("v bucket %s weisite failed.\r\n", bucket.data);
+    }
+
+    s = oss_get_bucket_website(options, &bucket, &website_config, &resp_headers);
+    if (aos_status_is_ok(s)) {
+        printf("get bucket %s weisite success, index is %s, error is %s\r\n", bucket.data,
+               website_config.suffix_str.data, website_config.key_str.data);
+    } else {
+        printf("get bucket %s weisite failed.\r\n", bucket.data);
+    }
 
     s = oss_put_bucket_acl(options, &bucket, OSS_ACL_PRIVATE, &resp_headers);
     if (aos_status_is_ok(s)) {
