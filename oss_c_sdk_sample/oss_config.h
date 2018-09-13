@@ -15,6 +15,7 @@ extern const char MULTIPART_UPLOAD_FILE_PATH[];
 extern const char IO_HOST[];
 extern const char UP_HOST[];
 extern const char RS_HOST[];
+extern const char RSF_HOST[];
 extern const char UC_HOST[];
 extern const char ZONE[];
 

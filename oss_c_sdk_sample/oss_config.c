@@ -9,6 +9,7 @@ const char MULTIPART_UPLOAD_FILE_PATH[] = "<your local file>";
 const char IO_HOST[] = "https://iovip.qbox.me";
 const char UP_HOST[] = "https://upload.qiniu.com";
 const char RS_HOST[] = "https://rs.qbox.me";
+const char RSF_HOST[] = "https://rsf.qbox.me";
 const char UC_HOST[] = "https://uc.qbox.me";
 const char ZONE[] = "z0";
 

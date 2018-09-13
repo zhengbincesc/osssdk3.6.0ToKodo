@@ -242,52 +242,6 @@ aos_status_t *oss_get_object_address(const oss_request_options_t *options,
                                      int timeout,
                                      aos_table_t **resp_headers)
 {
-    //cesc TODO: need to config EncodeURI, look at service.go/GetObject
-    aos_status_t      *s           = NULL;
-    char              *EncodeURI   = "cesc:haha";
-    const char        *privateURL  = NULL;
-    char              *getdomain   = NULL;
-    Qiniu_Json        *root        = NULL;
-    char               asTimeout[10];
-    Qiniu_Error        err;
-    Qiniu_Mac          mac;
-    Qiniu_Client       client;
-
-    mac.accessKey = options->config->access_key_id.data;
-    mac.secretKey = options->config->access_key_secret.data;
-
-    //timeout should be between 1 and 3600
-    if ((timeout < 1) || (timeout > 3600)) {
-        s = aos_status_create(options->pool);
-        aos_status_set(s, AOSE_INVALID_ARGUMENT, "timeout should be between 1 and 3600", NULL);
-        return s;
-    }
-
-    sprintf(asTimeout, "%u", (unsigned int)timeout);
-    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
-    getdomain = Qiniu_String_Concat(options->config->rs_host.data, "/get/", EncodeURI,
-                                    "/expires/", asTimeout, NULL);
-    err = Qiniu_Client_Call(&client, &root, getdomain);
-    if (aos_http_is_ok(err.code)) {
-        privateURL = Qiniu_Json_GetString(root, "url", "");
-        aos_str_set(objectAddress, apr_pstrdup(options->pool, privateURL));
-    }
-
-    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
-
-    Qiniu_Free(getdomain);
-    Qiniu_Client_Cleanup(&client);
-
-    return s;
-}
-
-aos_status_t *oss_get_object_address_usedomain(const oss_request_options_t *options,
-                                     const aos_string_t *bucket,
-                                     const aos_string_t *object,
-                                     aos_string_t *objectAddress,
-                                     int timeout,
-                                     aos_table_t **resp_headers)
-{
     aos_status_t      *s           = NULL;
     char              *baseUrl     = NULL;
     char              *privateURL  = NULL;

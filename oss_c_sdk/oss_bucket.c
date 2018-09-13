@@ -8,9 +8,37 @@
 #include "oss_xml.h"
 #include "oss_api.h"
 #include "c-sdk/qiniu/http.h"
+#include "c-sdk/qiniu/rsf.h"
 #include "c-sdk/cJSON/cJSON.h"
 
 #define KODO_BUCKET_NOT_FOUND_CODE 612
+
+static inline int oss_str_empty(const char *s) {
+    return (s == NULL) || strcmp("", s) == 0;
+}
+
+static void oss_transfer_item_to_content(aos_pool_t *pool, const Qiniu_RSF_ListItem *pitem,
+                                         oss_list_object_content_t *content)
+{
+    struct tm  *tmp         = NULL;
+    long int    secondtime  = 0;
+    char        size[21];   /* 2^64+1 can be represented in 21 chars. */
+    char        puttime[64];
+
+    //cesc TODO: set hash to etag?owner_id,owner_display_name?
+    aos_str_set(&content->key, apr_pstrdup(pool, pitem->key));
+    sprintf(size, "%lld", pitem->fsize);
+    aos_str_set(&content->size, apr_pstrdup(pool, size));
+    aos_str_set(&content->etag, apr_pstrdup(pool, pitem->hash));
+
+    secondtime = (long int)(pitem->putTime/1e7);
+    tmp = localtime(&secondtime);
+    if (0 != strftime(puttime, 64, "%Y-%m-%d %H:%M:%S", tmp) ) {
+        aos_str_set(&content->last_modified, apr_pstrdup(pool, puttime));
+    }
+
+    return;
+}
 
 static aos_status_t *oss_create_bucket_with_params(const oss_request_options_t *options, 
                                                    const aos_string_t *bucket, 
@@ -471,38 +499,67 @@ aos_status_t *oss_list_object(const oss_request_options_t *options,
                               oss_list_object_params_t *params, 
                               aos_table_t **resp_headers)
 {
-    int res;
-    aos_status_t *s = NULL;
-    aos_http_request_t *req = NULL;
-    aos_http_response_t *resp = NULL;
-    aos_table_t *query_params = NULL;
-    aos_table_t *headers = NULL;
+    aos_status_t                    *s             = NULL;
+    oss_list_object_common_prefix_t *common_prefix = NULL;
+    oss_list_object_content_t       *content       = NULL;
+    char                            *prefix        = NULL;
+    char                            *delimiter     = NULL;
+    char                            *marker        = NULL;
+    int                              limit         = 0;
+    int                              i             = 0;
+    Qiniu_Client                     client;
+    Qiniu_Mac                        mac;
+    Qiniu_Error                      err;
+    Qiniu_RSF_ListRet                listRet;
 
-    //init query_params
-    query_params = aos_table_create_if_null(options, query_params, 4);
-    apr_table_add(query_params, OSS_PREFIX, params->prefix.data);
-    apr_table_add(query_params, OSS_DELIMITER, params->delimiter.data);
-    apr_table_add(query_params, OSS_MARKER, params->marker.data);
-    aos_table_add_int(query_params, OSS_MAX_KEYS, params->max_ret);
-    
-    //init headers
-    headers = aos_table_create_if_null(options, headers, 0);
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
 
-    oss_init_bucket_request(options, bucket, HTTP_GET, &req, 
-                            query_params, headers, &resp);
+    prefix = params->prefix.data;
+    delimiter = params->delimiter.data;
+    marker = params->marker.data;
+    //cesc TODO: limit will be huge?
+    limit = params->max_ret;
 
-    s = oss_process_request(options, req, resp);
-    oss_fill_read_response_header(resp, resp_headers);
-    if (!aos_status_is_ok(s)) {
+    QINIU_RSF_HOST = options->config->rsf_host.data;
+    err = Qiniu_RSF_ListFiles(&client, &listRet, bucket->data, prefix, delimiter, marker, limit);
+
+    if (!aos_http_is_ok(err.code)) {
+        s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+        Qiniu_Client_Cleanup(&client);
         return s;
     }
 
-    res = oss_list_objects_parse_from_body(options->pool, &resp->body, 
-            &params->object_list, &params->common_prefix_list, 
-            &params->next_marker, &params->truncated);
-    if (res != AOSE_OK) {
-        aos_xml_error_status_set(s, res);
+    params->truncated = AOS_FALSE;
+    if (!oss_str_empty(listRet.marker)) {
+        params->truncated = AOS_TRUE;
+        aos_str_set(&params->next_marker, apr_pstrdup(options->pool, listRet.marker));
     }
+
+    for (i = 0; i < listRet.commonPrefixesCount; i++) {
+        common_prefix = oss_create_list_object_common_prefix(options->pool);
+        prefix = apr_pstrdup(options->pool, listRet.commonPrefixes[i]);
+        aos_str_set(&common_prefix->prefix, prefix);
+        aos_list_add_tail(&common_prefix->node, &params->common_prefix_list);
+    }
+
+    for (i = 0; i < listRet.itemsCount; i++) {
+        content = oss_create_list_object_content(options->pool);
+        oss_transfer_item_to_content(options->pool, &listRet.items[i], content);
+        aos_list_add_tail(&content->node, &params->object_list);
+    }
+
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+
+    if (listRet.commonPrefixes != NULL) {
+        Qiniu_Free(listRet.commonPrefixes);
+    }
+    if (listRet.items != NULL) {
+        Qiniu_Free(listRet.items);
+    }
+
+    Qiniu_Client_Cleanup(&client);
 
     return s;
 }

@@ -53,6 +53,7 @@ int main(int argc, char *argv[])
     get_object_to_local_file();
     delete_object();
     put_object_from_file();
+    list_object_sample();
     get_object_address();
 
     aos_http_io_deinitialize();

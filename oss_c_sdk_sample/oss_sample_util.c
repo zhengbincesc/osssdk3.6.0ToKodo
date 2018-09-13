@@ -57,6 +57,7 @@ void init_sample_config(oss_config_t *config, int is_cname)
     aos_str_set(&config->io_host, IO_HOST);
     aos_str_set(&config->up_host, UP_HOST);
     aos_str_set(&config->rs_host, RS_HOST);
+    aos_str_set(&config->rsf_host, RSF_HOST);
     aos_str_set(&config->uc_host, UC_HOST);
     aos_str_set(&config->zone, ZONE);
     config->is_cname = is_cname;
