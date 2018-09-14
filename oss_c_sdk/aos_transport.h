@@ -22,6 +22,7 @@ typedef int (*aos_write_http_body_pt)(aos_http_response_t *resp, const char *buf
 typedef void (*oss_progress_callback)(int64_t consumed_bytes, int64_t total_bytes);
 
 void aos_curl_response_headers_parse(aos_pool_t *p, aos_table_t *headers, char *buffer, int len);
+void aos_transport_headers(aos_pool_t *p, const char *pkodoheader, aos_table_t **resp_headers);
 aos_http_transport_t *aos_curl_http_transport_create(aos_pool_t *p);
 int aos_curl_http_transport_perform(aos_http_transport_t *t);
 

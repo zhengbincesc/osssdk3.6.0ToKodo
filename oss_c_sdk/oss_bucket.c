@@ -25,7 +25,6 @@ static void oss_transfer_item_to_content(aos_pool_t *pool, const Qiniu_RSF_ListI
     char        size[21];   /* 2^64+1 can be represented in 21 chars. */
     char        puttime[64];
 
-    //cesc TODO: set hash to etag?owner_id,owner_display_name?
     aos_str_set(&content->key, apr_pstrdup(pool, pitem->key));
     sprintf(size, "%lld", pitem->fsize);
     aos_str_set(&content->size, apr_pstrdup(pool, size));
@@ -98,14 +97,18 @@ aos_status_t *oss_create_bucket(const oss_request_options_t *options,
     url = Qiniu_String_Concat(options->config->rs_host.data, "/mkbucketv2/", encBucket, NULL);
     err = Qiniu_Client_CallNoRet(&client, url);
 
-    //cesc If oss acl is private, create private bucket, else create public bucket
-    if ((OSS_ACL_PRIVATE == oss_acl) && (200 == err.code)) {
+    //If oss acl is private, create private bucket, else create public bucket
+    if ((OSS_ACL_PRIVATE == oss_acl) && aos_http_is_ok(err.code)) {
         Qiniu_Free(url);
         Qiniu_Client_Cleanup(&client);
 
         Qiniu_Client_InitMacAuth(&client, 1024, &mac);
         url = Qiniu_String_Concat(options->config->uc_host.data, "/private?bucket=", bucket->data, "&private=1", NULL);
         err = Qiniu_Client_CallNoRet(&client, url);
+    }
+
+    if (aos_http_is_ok(err.code)) {
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
     }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
@@ -150,10 +153,14 @@ aos_status_t *oss_delete_bucket(const oss_request_options_t *options,
     Qiniu_Client_InitMacAuth(&client, 1024, &mac);
     url = Qiniu_String_Concat3(options->config->rs_host.data, "/drop/", bucket->data);
     err = Qiniu_Client_CallNoRet(&client, url);
-    Qiniu_Free(url);
+
+    if (aos_http_is_ok(err.code)) {
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+    }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
 
+    Qiniu_Free(url);
     Qiniu_Client_Cleanup(&client);
 
     return s;
@@ -175,14 +182,18 @@ aos_status_t *oss_put_bucket_acl(const oss_request_options_t *options,
     mac.secretKey = options->config->access_key_secret.data;
     Qiniu_Client_InitMacAuth(&client, 1024, &mac);
 
-    //cesc If oss acl is private, set private bucket, else set public bucket
+    //If oss acl is private, set private bucket, else set public bucket
     if (OSS_ACL_PRIVATE == oss_acl) {
         private = "1";
     }
 
     url = Qiniu_String_Concat(options->config->uc_host.data, "/private?bucket=", bucket->data, "&private=", private,  NULL);
     err = Qiniu_Client_CallNoRet(&client, url);
-    //cesc TODO: bucket not exist, this will be ok?
+
+    if (aos_http_is_ok(err.code)) {
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+    }
+
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
 
     Qiniu_Free(url);
@@ -212,11 +223,12 @@ aos_status_t *oss_get_bucket_acl(const oss_request_options_t *options,
     err = Qiniu_Client_Call(&client, &root, url);
 
     if (aos_http_is_ok(err.code)) {
-        //cesc If bucket is private,return private. else return public-read-write
+        //If bucket is private,return private. else return public-read-write
         if (1 == Qiniu_Json_GetInt(root, "private", 0)) {
             pacl = "private";
         }
         aos_str_set(oss_acl, apr_pstrdup(options->pool, pacl));
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
     }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
@@ -249,9 +261,11 @@ aos_status_t *oss_check_bucket(const oss_request_options_t *options,
     *pIsExist = 0;
     if (aos_http_is_ok(err.code)) {
         *pIsExist = 1;
+         aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
     } else if (KODO_BUCKET_NOT_FOUND_CODE == err.code) {
         //If code is not found, reset code to 200
         err.code = 200;
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
     }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
@@ -341,18 +355,15 @@ aos_status_t *oss_get_bucket_info(const oss_request_options_t *options,
     Qiniu_Client_InitMacAuth(&client, 1024, &mac);
     url = Qiniu_String_Concat3(options->config->uc_host.data, "/v2/bucketInfo?bucket=", bucket->data);
     err = Qiniu_Client_Call(&client, &root, url);
-    //cesc TODO: how to set created_date, extranet_endpoint, intranet_endpoint, location, owner_name, owner_id?
-    //v2/buckets?
     if (aos_http_is_ok(err.code)) {
-        //cesc If bucket is private,return private. else return public-read-write
+        //If bucket is private,return private. else return public-read-write
         if (1 == Qiniu_Json_GetInt(root, "private", 0)) {
             pacl = "private";
         }
         aos_str_set(&bucket_info->acl, apr_pstrdup(options->pool, pacl));
         location = Qiniu_Json_GetString(root, "region", "");
         aos_str_set(&bucket_info->location, apr_pstrdup(options->pool, location));
-
-        printf("location is %s, response body is %s\r\n", location, Qiniu_Buffer_CStr(&client.b));
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
     }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
@@ -519,7 +530,6 @@ aos_status_t *oss_list_object(const oss_request_options_t *options,
     prefix = params->prefix.data;
     delimiter = params->delimiter.data;
     marker = params->marker.data;
-    //cesc TODO: limit will be huge?
     limit = params->max_ret;
 
     QINIU_RSF_HOST = options->config->rsf_host.data;
@@ -550,6 +560,8 @@ aos_status_t *oss_list_object(const oss_request_options_t *options,
         aos_list_add_tail(&content->node, &params->object_list);
     }
 
+    aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
 
     if (listRet.commonPrefixes != NULL) {
@@ -579,8 +591,7 @@ aos_status_t *oss_list_bucket(const oss_request_options_t *options,
     int             i;
     oss_list_bucket_content_t *content;
 
-    //cesc TODO: resp_headers, all interface?
-    /* cesc kodo does not support prefix, marker, ax-keys, so just return all buckets
+    /* kodo does not support prefix, marker, max-keys, so just return all buckets
     owner_id, owner_name,CreationDate, ExtranetEndpoint, IntranetEndpoint, Location, StorageClass does not support too  */
     mac.accessKey = options->config->access_key_id.data;
     mac.secretKey = options->config->access_key_secret.data;
@@ -604,6 +615,8 @@ aos_status_t *oss_list_bucket(const oss_request_options_t *options,
             aos_str_set(&content->name, value);
             aos_list_add_tail(&content->node, &params->bucket_list);
         }
+
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
     }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
@@ -855,8 +868,6 @@ aos_status_t *oss_put_bucket_website(const oss_request_options_t *options,
                                      oss_website_config_t *website_config,
                                      aos_table_t **resp_headers)
 {
-    //cesc TODO: put bucket && get bucket need discuss
-    //website_config suffix_str, key_str does not make sense, index.html,index.htm,error_404
     aos_status_t *s         = NULL;
     char         *url       = NULL;
     Qiniu_Error   err;
@@ -869,6 +880,10 @@ aos_status_t *oss_put_bucket_website(const oss_request_options_t *options,
 
     url = Qiniu_String_Concat(options->config->uc_host.data, "/noIndexPage?bucket=", bucket->data, "&noIndexPage=0", NULL);
     err = Qiniu_Client_CallNoRet(&client, url);
+
+    if (aos_http_is_ok(err.code)) {
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+    }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
 
@@ -901,6 +916,8 @@ aos_status_t *oss_get_bucket_website(const oss_request_options_t *options,
             aos_str_set(&website_config->suffix_str, apr_pstrdup(options->pool, "index.html"));
             aos_str_set(&website_config->key_str, apr_pstrdup(options->pool, "error-404"));
         }
+
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
     }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);

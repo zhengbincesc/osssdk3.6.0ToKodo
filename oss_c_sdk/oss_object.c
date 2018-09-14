@@ -106,10 +106,14 @@ aos_status_t *oss_put_object_from_file(const oss_request_options_t *options,
     Qiniu_Client_SetLowSpeedLimit(&client, options->ctl->options->speed_limit, options->ctl->options->speed_time);
     error = Qiniu_Io_PutFile(&client, &putRet, uptoken, object->data, filename->data, &putExtra);
 
-    Qiniu_Free(uptoken);
-    Qiniu_Client_Cleanup(&client);
+    if (aos_http_is_ok(error.code)) {
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+    }
 
     s = oss_transfer_err_to_aos(options->pool, error.code, error.message);
+
+    Qiniu_Free(uptoken);
+    Qiniu_Client_Cleanup(&client);
 
     return s;
 }
@@ -276,13 +280,12 @@ aos_status_t *oss_get_object_address(const oss_request_options_t *options,
             Qiniu_Free(domainUrl);
             Qiniu_Client_Cleanup(&client);
             s = aos_status_create(options->pool);
-            aos_status_set(s, AOSE_INVALID_ARGUMENT, "need config at least one domain", NULL);
+            aos_status_set(s, AOSE_SERVICE_ERROR, "need config at least one domain", NULL);
             return s;
         }
         item = cJSON_GetArrayItem(root, 0);
         //just get first domain
         domain = Qiniu_Json_GetString(item, "domain", NULL);
-        //cesc TODO: domain not exist, which one?
         if (NULL == domain) {
             Qiniu_Free(domainUrl);
             Qiniu_Client_Cleanup(&client);
@@ -302,6 +305,8 @@ aos_status_t *oss_get_object_address(const oss_request_options_t *options,
     privateURL = Qiniu_RS_GetPolicy_MakeRequest(&getPolicy, baseUrl, &mac);
 
     aos_str_set(objectAddress, apr_pstrdup(options->pool, privateURL));
+
+    aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
 
     s = aos_status_create(options->pool);
     s->code = 200;
@@ -501,10 +506,14 @@ aos_status_t *oss_delete_object(const oss_request_options_t *options,
 
     err = Qiniu_Client_CallNoRet(&client, url);
 
-    Qiniu_Free(url);
-    Qiniu_Client_Cleanup(&client);
+    if (aos_http_is_ok(err.code)) {
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+    }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+
+    Qiniu_Free(url);
+    Qiniu_Client_Cleanup(&client);
 
     return s;
 }

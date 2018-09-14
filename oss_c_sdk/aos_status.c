@@ -114,7 +114,7 @@ aos_status_t *oss_transfer_err_to_aos(aos_pool_t *pool, int code, const char *me
     s->error_code = NULL;
     s->error_msg = NULL;
     if (!aos_http_is_ok(code) && (NULL != message)) {
-        //cesc kodo just have http code & message, both set error_code & error_msg to message
+        //kodo just have http code & message, both set error_code & error_msg to message
         s->error_code = apr_pstrdup(pool, message);
         s->error_msg = apr_pstrdup(pool, message);
     }
