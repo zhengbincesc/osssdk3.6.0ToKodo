@@ -384,11 +384,14 @@ void operate_bucket_sample()
     aos_str_set(&bucket, BUCKET_NAME);
     oss_website_config_t website_config;
 
+    aos_str_set(&website_config.suffix_str, "index.html");
+    aos_str_set(&website_config.key_str, "error-404");
+
     s = oss_put_bucket_website(options, &bucket, &website_config, &resp_headers);
     if (aos_status_is_ok(s)) {
         printf("put bucket %s weisite success\r\n", bucket.data);
     } else {
-        printf("v bucket %s weisite failed.\r\n", bucket.data);
+        printf("put bucket %s weisite failed, error is %s.\r\n", bucket.data, s->error_code);
     }
 
     s = oss_get_bucket_website(options, &bucket, &website_config, &resp_headers);

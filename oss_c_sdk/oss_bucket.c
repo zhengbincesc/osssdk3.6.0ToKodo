@@ -345,9 +345,11 @@ aos_status_t *oss_get_bucket_info(const oss_request_options_t *options,
     char           *url       = NULL;
     const char     *location  = NULL;
     char           *pacl      = "public-read-write";
+    Qiniu_Uint32    uid      = 0;
     Qiniu_Error     err;
     Qiniu_Client    client;
     Qiniu_Mac       mac;
+    char            struid[21];
 
     mac.accessKey = options->config->access_key_id.data;
     mac.secretKey = options->config->access_key_secret.data;
@@ -363,7 +365,20 @@ aos_status_t *oss_get_bucket_info(const oss_request_options_t *options,
         aos_str_set(&bucket_info->acl, apr_pstrdup(options->pool, pacl));
         location = Qiniu_Json_GetString(root, "region", "");
         aos_str_set(&bucket_info->location, apr_pstrdup(options->pool, location));
-        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+
+        Qiniu_Free(url);
+        Qiniu_Client_Cleanup(&client);
+
+        Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+        url = Qiniu_String_Concat3(options->config->rs_host.data, "/bucket/", bucket->data);
+        err = Qiniu_Client_Call(&client, &root, url);
+        if (aos_http_is_ok(err.code)) {
+            uid = Qiniu_Json_GetUInt32(root, "uid", 0);
+            sprintf(struid, "%u", uid);
+            aos_str_set(&bucket_info->owner_id, apr_pstrdup(options->pool, struid));
+            aos_str_set(&bucket_info->owner_name, apr_pstrdup(options->pool, struid));
+            aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+        }
     }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
@@ -874,6 +889,13 @@ aos_status_t *oss_put_bucket_website(const oss_request_options_t *options,
     Qiniu_Client  client;
     Qiniu_Mac     mac;
 
+    if ((strcmp(website_config->suffix_str.data, "index.html") != 0) ||
+        (strcmp(website_config->key_str.data, "error-404") != 0)) {
+        s = aos_status_create(options->pool);
+        aos_status_set(s, AOSE_INVALID_ARGUMENT, "suffix must be index.html, key must be error-404", NULL);
+        return s;
+    }
+
     mac.accessKey = options->config->access_key_id.data;
     mac.secretKey = options->config->access_key_secret.data;
     Qiniu_Client_InitMacAuth(&client, 1024, &mac);
@@ -915,6 +937,13 @@ aos_status_t *oss_get_bucket_website(const oss_request_options_t *options,
         if (0 == Qiniu_Json_GetInt(root, "no_index_page", 0)) {
             aos_str_set(&website_config->suffix_str, apr_pstrdup(options->pool, "index.html"));
             aos_str_set(&website_config->key_str, apr_pstrdup(options->pool, "error-404"));
+        } else {
+            s = aos_status_create(options->pool);
+            aos_status_set(s, AOSE_INVALID_OPERATION, "please set website first", NULL);
+            Qiniu_Free(url);
+            Qiniu_Client_Cleanup(&client);
+
+            return s;
         }
 
         aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
