@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include "oss_config.h"
 #include "oss_api.h"
+#include "oss_util.h"
 #include "oss_sample_util.h"
 
 void make_rand_string(aos_pool_t *p, int len, aos_string_t *data)
@@ -54,19 +55,14 @@ void init_sample_config(oss_config_t *config, int is_cname)
     aos_str_set(&config->endpoint, OSS_ENDPOINT);
     aos_str_set(&config->access_key_id, ACCESS_KEY_ID);
     aos_str_set(&config->access_key_secret, ACCESS_KEY_SECRET);
-    aos_str_set(&config->io_host, IO_HOST);
-    aos_str_set(&config->up_host, UP_HOST);
-    aos_str_set(&config->rs_host, RS_HOST);
-    aos_str_set(&config->rsf_host, RSF_HOST);
-    aos_str_set(&config->uc_host, UC_HOST);
-    aos_str_set(&config->zone, ZONE);
     config->is_cname = is_cname;
 }
 
 void init_sample_request_options(oss_request_options_t *options, int is_cname)
 {
     options->config = oss_config_create(options->pool);
-    init_sample_config(options->config, is_cname);
+    init_application_config(options->pool, options->config);
+    options->config->is_cname = is_cname;
     options->ctl = aos_http_controller_create(options->pool, 0);
 }
 

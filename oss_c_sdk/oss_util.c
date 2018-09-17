@@ -1,3 +1,5 @@
+#include <unistd.h>
+
 #include "aos_string.h"
 #include "aos_util.h"
 #include "aos_log.h"
@@ -11,6 +13,9 @@
 #include<netinet/in.h>
 #include<arpa/inet.h>
 #endif
+
+#define CONF_LINE_LENGTH 512
+#define CONF_KEY_LENGTH  256
 
 static char *default_content_type = "application/octet-stream";
 
@@ -758,6 +763,123 @@ const char *get_oss_storage_class_str(oss_storage_class_type_e storage_class)
         default:
             return NULL;
     }
+}
+
+static void trimeSpace(const char *psrc, char *dest)
+{
+    unsigned long i   = 0;
+    unsigned long j   = strlen(psrc) - 1;
+    unsigned long len = 0;
+
+    while (psrc[i] == ' ') {
+        i++;
+    }
+
+    while (psrc[j] == ' ') {
+        j--;
+    }
+
+    len = j - i + 1;
+    memcpy(dest, psrc + i, len);
+    *(dest+len) = '\0';
+
+    return;
+}
+
+static void trimQuotation(const char *psrc, char *dest)
+{
+    unsigned long i   = 0;
+    unsigned long j   = strlen(psrc) - 1;
+    unsigned long len = 0;
+
+    if (psrc[0] == '\"') {
+        i++;
+    }
+
+    while ((psrc[j] == '\"') || (psrc[j] == '\r') || (psrc[j] == '\n')) {
+        if (psrc[j] == '\"') {  //just skip first "
+            j--;
+            break;
+        }
+        j--;
+    }
+
+    len = j - i + 1;
+    memcpy(dest, psrc + i, len);
+    *(dest+len) = '\0';
+
+    return;
+}
+
+void init_config(aos_pool_t *p, char *pkey, char *pthickValue, oss_config_t *config)
+{
+    char valuebuff[CONF_KEY_LENGTH] = {0};
+
+    trimQuotation(pthickValue, valuebuff);
+
+    if (strcmp("access_key_id", pkey) == 0) {
+        aos_str_set(&config->access_key_id, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("access_key_secret", pkey) == 0) {
+        aos_str_set(&config->access_key_secret, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("io_host", pkey) == 0) {
+        aos_str_set(&config->io_host, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("up_host", pkey) == 0) {
+        aos_str_set(&config->up_host, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("rs_host", pkey) == 0) {
+        aos_str_set(&config->rs_host, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("rsf_host", pkey) == 0) {
+        aos_str_set(&config->rsf_host, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("uc_host", pkey) == 0) {
+        aos_str_set(&config->uc_host, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("zone", pkey) == 0) {
+        aos_str_set(&config->zone, apr_pstrdup(p, valuebuff));
+    }
+
+    return;
+}
+
+void init_application_config(aos_pool_t *p, oss_config_t *config)
+{
+    //get config from application.conf
+    FILE *fp = NULL;
+    char *pLine = NULL;
+    char line[CONF_LINE_LENGTH] = {0};
+    char thickKey[CONF_KEY_LENGTH] = {0};
+    char keybuff[CONF_KEY_LENGTH] = {0};
+    char thickValue[CONF_KEY_LENGTH] = {0};
+    char currentPath[CONF_LINE_LENGTH] = {0};
+
+    fp = fopen("application.conf", "r");
+    if (NULL == fp) {
+        getcwd(currentPath, CONF_LINE_LENGTH);
+        aos_error_log("fail to open application.conf, please make sure %s have application.conf.\r\n",
+                      currentPath);
+        return;
+    }
+
+    while (!feof(fp)) {
+        if (fgets(line, CONF_LINE_LENGTH, fp) == NULL) {  //get one line
+            break;
+        }
+
+        if ((pLine = strstr(line, "=")) == NULL) {   //this line does not contain =, continue
+            continue;
+        }
+
+        memcpy(thickKey, line, pLine - line);
+        trimeSpace(thickKey, keybuff);
+
+        pLine += 1;  // skip =
+        trimeSpace(pLine, thickValue);
+
+        init_config(p, keybuff, thickValue, config);
+
+        memset(thickKey, 0, CONF_KEY_LENGTH);
+        memset(keybuff, 0, CONF_KEY_LENGTH);
+        memset(thickValue, 0, CONF_KEY_LENGTH);
+    }
+
+    return;
 }
 
 void oss_init_request(const oss_request_options_t *options, 

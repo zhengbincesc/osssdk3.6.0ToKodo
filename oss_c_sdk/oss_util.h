@@ -55,6 +55,8 @@ void oss_config_resolve(aos_pool_t *pool, oss_config_t *config, aos_http_control
 **/
 oss_request_options_t *oss_request_options_create(aos_pool_t *p);
 
+void init_application_config(aos_pool_t *p, oss_config_t *config);
+
 /**
   * @brief  init oss request
 **/
