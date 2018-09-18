@@ -99,7 +99,9 @@ void init_test_config(oss_config_t *config, int is_cname)
 void init_test_request_options(oss_request_options_t *options, int is_cname)
 {
     options->config = oss_config_create(options->pool);
-    init_test_config(options->config, is_cname);
+    init_application_config(options->pool, options->config);
+    aos_str_set(&options->config->endpoint, TEST_OSS_ENDPOINT);
+    options->config->is_cname = is_cname;
     options->ctl = aos_http_controller_create(options->pool, 0);
 }
 

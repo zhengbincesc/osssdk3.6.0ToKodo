@@ -74,6 +74,11 @@ aos_status_t *oss_get_bucket_acl(const oss_request_options_t *options,
                                  aos_string_t *oss_acl,
                                  aos_table_t **resp_headers);
 
+aos_status_t *oss_check_bucket(const oss_request_options_t *options,
+                               const aos_string_t *bucket,
+                               int *pIsExist,
+                               aos_table_t **resp_headers);
+
 /*
  * @brief  head oss bucket 
  * @param[in]   options       the oss request options
@@ -486,6 +491,13 @@ aos_status_t *oss_do_get_object_to_buffer(const oss_request_options_t *options,
                                           aos_list_t *buffer,
                                           oss_progress_callback progress_callback, 
                                           aos_table_t **resp_headers);
+
+aos_status_t *oss_get_object_address(const oss_request_options_t *options,
+                                     const aos_string_t *bucket,
+                                     const aos_string_t *object,
+                                     aos_string_t *objectAddress,
+                                     int timeout,
+                                     aos_table_t **resp_headers);
 
 /*
  * @brief  get oss object to file

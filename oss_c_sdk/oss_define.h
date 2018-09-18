@@ -143,6 +143,12 @@ typedef struct {
     int proxy_port;
     aos_string_t proxy_user;
     aos_string_t proxy_passwd;
+    aos_string_t io_host;
+    aos_string_t up_host;
+    aos_string_t rs_host;
+    aos_string_t rsf_host;
+    aos_string_t uc_host;
+    aos_string_t zone;
 } oss_config_t;
 
 typedef struct {

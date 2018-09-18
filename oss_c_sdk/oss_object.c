@@ -6,6 +6,9 @@
 #include "oss_util.h"
 #include "oss_xml.h"
 #include "oss_api.h"
+#include "c-sdk/qiniu/io.h"
+#include "c-sdk/qiniu/rs.h"
+#include "c-sdk/cJSON/cJSON.h"
 
 char *oss_gen_signed_url(const oss_request_options_t *options,
                          const aos_string_t *bucket, 
@@ -82,8 +85,37 @@ aos_status_t *oss_put_object_from_file(const oss_request_options_t *options,
                                        aos_table_t *headers, 
                                        aos_table_t **resp_headers)
 {
-    return oss_do_put_object_from_file(options, bucket, object, filename, 
-                                       headers, NULL, NULL, resp_headers, NULL);
+    aos_status_t      *s       = NULL;
+    char              *uptoken = NULL;
+    Qiniu_Io_PutRet    putRet;
+    Qiniu_Client       client;
+    Qiniu_RS_PutPolicy putPolicy;
+    Qiniu_Io_PutExtra  putExtra;
+    Qiniu_Mac          mac;
+    Qiniu_Error        error;
+
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+    Qiniu_Zero(putPolicy);
+    Qiniu_Zero(putExtra);
+    putPolicy.scope = bucket->data;
+    QINIU_UP_HOST = options->config->up_host.data;
+
+    uptoken = Qiniu_RS_PutPolicy_Token(&putPolicy, &mac);
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    Qiniu_Client_SetLowSpeedLimit(&client, options->ctl->options->speed_limit, options->ctl->options->speed_time);
+    error = Qiniu_Io_PutFile(&client, &putRet, uptoken, object->data, filename->data, &putExtra);
+
+    if (aos_http_is_ok(error.code)) {
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+    }
+
+    s = oss_transfer_err_to_aos(options->pool, error.code, error.message);
+
+    Qiniu_Free(uptoken);
+    Qiniu_Client_Cleanup(&client);
+
+    return s;
 }
 
 aos_status_t *oss_do_put_object_from_file(const oss_request_options_t *options,
@@ -207,6 +239,86 @@ aos_status_t *oss_restore_object(const oss_request_options_t *options,
     return s;
 }
 
+aos_status_t *oss_get_object_address(const oss_request_options_t *options,
+                                     const aos_string_t *bucket,
+                                     const aos_string_t *object,
+                                     aos_string_t *objectAddress,
+                                     int timeout,
+                                     aos_table_t **resp_headers)
+{
+    aos_status_t      *s           = NULL;
+    char              *baseUrl     = NULL;
+    char              *privateURL  = NULL;
+    char              *domainUrl   = NULL;
+    const char        *domain      = NULL;
+    int                domainCount = 0;
+    Qiniu_Json        *root        = NULL;
+    Qiniu_Json        *item        = NULL;
+    Qiniu_Error        err;
+    Qiniu_Mac          mac;
+    Qiniu_RS_GetPolicy getPolicy;
+    Qiniu_Client       client;
+
+
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+
+    //timeout should be between 1 and 3600
+    if ((timeout < 1) || (timeout > 3600)) {
+        s = aos_status_create(options->pool);
+        aos_status_set(s, AOSE_INVALID_ARGUMENT, "timeout should be between 1 and 3600", NULL);
+        return s;
+    }
+
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    domainUrl = Qiniu_String_Concat3("https://api.qiniu.com", "/v7/domain/list?tbl=", bucket->data);
+    err = Qiniu_Client_Call(&client, &root, domainUrl);
+
+    if (aos_http_is_ok(err.code)) {
+        domainCount = cJSON_GetArraySize(root);
+        if (0 == domainCount) {
+            Qiniu_Free(domainUrl);
+            Qiniu_Client_Cleanup(&client);
+            s = aos_status_create(options->pool);
+            aos_status_set(s, AOSE_SERVICE_ERROR, "need config at least one domain", NULL);
+            return s;
+        }
+        item = cJSON_GetArrayItem(root, 0);
+        //just get first domain
+        domain = Qiniu_Json_GetString(item, "domain", NULL);
+        if (NULL == domain) {
+            Qiniu_Free(domainUrl);
+            Qiniu_Client_Cleanup(&client);
+            s = aos_status_create(options->pool);
+            aos_status_set(s, AOSE_SERVICE_ERROR, "need config at least one domain", NULL);
+            return s;
+        }
+    } else {
+        Qiniu_Free(domainUrl);
+        Qiniu_Client_Cleanup(&client);
+        return oss_transfer_err_to_aos(options->pool, err.code, err.message);
+    }
+
+    Qiniu_Zero(getPolicy);
+    getPolicy.expires = timeout;
+    baseUrl = Qiniu_String_Concat("http://", domain, "/", object->data, NULL);
+    privateURL = Qiniu_RS_GetPolicy_MakeRequest(&getPolicy, baseUrl, &mac);
+
+    aos_str_set(objectAddress, apr_pstrdup(options->pool, privateURL));
+
+    aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+
+    s = aos_status_create(options->pool);
+    s->code = 200;
+
+    Qiniu_Free(domainUrl);
+    Qiniu_Client_Cleanup(&client);
+    Qiniu_Free(baseUrl);
+    Qiniu_Free(privateURL);
+
+    return s;
+}
+
 aos_status_t *oss_get_object_to_file(const oss_request_options_t *options,
                                      const aos_string_t *bucket, 
                                      const aos_string_t *object,
@@ -215,8 +327,38 @@ aos_status_t *oss_get_object_to_file(const oss_request_options_t *options,
                                      aos_string_t *filename, 
                                      aos_table_t **resp_headers)
 {
-    return oss_do_get_object_to_file(options, bucket, object, headers, 
-                                     params, filename, NULL, resp_headers);
+    aos_status_t *s = NULL;
+    aos_http_request_t *req = NULL;
+    aos_http_response_t *resp = NULL;
+    int res = AOSE_OK;
+    aos_string_t tmp_filename;
+
+    headers = aos_table_create_if_null(options, headers, 0);
+    params = aos_table_create_if_null(options, params, 0);
+
+    oss_get_temporary_file_name(options->pool, filename, &tmp_filename);
+
+    kodo_init_object_request(options, bucket, object, HTTP_GET,
+                            &req, params, headers, &resp);
+
+    s = aos_status_create(options->pool);
+    res = oss_init_read_response_body_to_file(options->pool, &tmp_filename, resp);
+    if (res != AOSE_OK) {
+        aos_file_error_status_set(s, res);
+        return s;
+    }
+
+    s = oss_process_request(options, req, resp);
+    oss_fill_read_response_header(resp, resp_headers);
+
+    if (is_enable_crc(options) && has_crc_in_response(resp) &&
+        !has_range_or_process_in_request(req)) {
+            oss_check_crc_consistent(resp->crc64, resp->headers, s);
+    }
+
+    oss_temp_file_rename(s, tmp_filename.data, filename->data, options->pool);
+
+    return s;
 }
 
 aos_status_t *oss_do_get_object_to_file(const oss_request_options_t *options,
@@ -344,21 +486,40 @@ aos_status_t *oss_delete_object(const oss_request_options_t *options,
                                 const aos_string_t *object, 
                                 aos_table_t **resp_headers)
 {
-    aos_status_t *s = NULL;
-    aos_http_request_t *req = NULL;
-    aos_http_response_t *resp = NULL;
-    aos_table_t *headers = NULL;
-    aos_table_t *query_params = NULL;
+    aos_status_t *s               = NULL;
+    char         *url             = NULL;
+    char         *entryURI        = NULL;
+    char         *entryURIEncoded = NULL;
+    Qiniu_Error   err;
+    Qiniu_Client  client;
+    Qiniu_Mac     mac;
 
-    headers = aos_table_create_if_null(options, headers, 0);
-    query_params = aos_table_create_if_null(options, query_params, 0);
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+    Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+    entryURI = Qiniu_String_Concat3(bucket->data, ":", object->data);
+    entryURIEncoded = Qiniu_String_Encode(entryURI);
+    url = Qiniu_String_Concat3(options->config->rs_host.data, "/delete/", entryURIEncoded);
 
-    oss_init_object_request(options, bucket, object, HTTP_DELETE, 
-                            &req, query_params, headers, NULL, 0, &resp);
-    oss_get_object_uri(options, bucket, object, req);
+    Qiniu_Free(entryURI);
+    Qiniu_Free(entryURIEncoded);
 
-    s = oss_process_request(options, req, resp);
-    oss_fill_read_response_header(resp, resp_headers);
+    err = Qiniu_Client_CallNoRet(&client, url);
+
+    if (aos_http_is_ok(err.code)) {
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+    }
+
+    //transfer kodo not exist code to oss not exist code
+    if (err.code == KODO_NOT_EXIST_CODE) {
+        err.code = OSS_OBJECT_NOT_EXIST_CODE;
+        err.message = "NoContent";
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+    }
+    s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+
+    Qiniu_Free(url);
+    Qiniu_Client_Cleanup(&client);
 
     return s;
 }

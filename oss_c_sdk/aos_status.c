@@ -105,3 +105,19 @@ aos_status_t *aos_status_parse_from_body(aos_pool_t *p, aos_list_t *bc, int code
 
     return s;
 }
+
+aos_status_t *oss_transfer_err_to_aos(aos_pool_t *pool, int code, const char *message) {
+    aos_status_t *s = NULL;
+
+    s = aos_status_create(pool);
+    s->code = code;
+    s->error_code = NULL;
+    s->error_msg = NULL;
+    if (!aos_http_is_ok(code) && (NULL != message)) {
+        //kodo just have http code & message, both set error_code & error_msg to message
+        s->error_code = apr_pstrdup(pool, message);
+        s->error_msg = apr_pstrdup(pool, message);
+    }
+
+    return s;
+}

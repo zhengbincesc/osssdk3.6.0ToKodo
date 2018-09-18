@@ -1,9 +1,12 @@
+#include <unistd.h>
+
 #include "aos_string.h"
 #include "aos_util.h"
 #include "aos_log.h"
 #include "aos_status.h"
 #include "oss_auth.h"
 #include "oss_util.h"
+#include "c-sdk/qiniu/rs.h"
 
 #ifndef WIN32
 #include<sys/socket.h>
@@ -11,7 +14,12 @@
 #include<arpa/inet.h>
 #endif
 
+#define CONF_LINE_LENGTH 512
+#define CONF_KEY_LENGTH  256
+
 static char *default_content_type = "application/octet-stream";
+
+static char *pHexTable = "0123456789abcdef";
 
 static oss_content_type_t file_type[] = {
     {"html", "text/html"},
@@ -757,6 +765,123 @@ const char *get_oss_storage_class_str(oss_storage_class_type_e storage_class)
     }
 }
 
+static void trimeSpace(const char *psrc, char *dest)
+{
+    unsigned long i   = 0;
+    unsigned long j   = strlen(psrc) - 1;
+    unsigned long len = 0;
+
+    while (psrc[i] == ' ') {
+        i++;
+    }
+
+    while (psrc[j] == ' ') {
+        j--;
+    }
+
+    len = j - i + 1;
+    memcpy(dest, psrc + i, len);
+    *(dest+len) = '\0';
+
+    return;
+}
+
+static void trimQuotation(const char *psrc, char *dest)
+{
+    unsigned long i   = 0;
+    unsigned long j   = strlen(psrc) - 1;
+    unsigned long len = 0;
+
+    if (psrc[0] == '\"') {
+        i++;
+    }
+
+    while ((psrc[j] == '\"') || (psrc[j] == '\r') || (psrc[j] == '\n')) {
+        if (psrc[j] == '\"') {  //just skip first "
+            j--;
+            break;
+        }
+        j--;
+    }
+
+    len = j - i + 1;
+    memcpy(dest, psrc + i, len);
+    *(dest+len) = '\0';
+
+    return;
+}
+
+void init_config(aos_pool_t *p, char *pkey, char *pthickValue, oss_config_t *config)
+{
+    char valuebuff[CONF_KEY_LENGTH] = {0};
+
+    trimQuotation(pthickValue, valuebuff);
+
+    if (strcmp("access_key_id", pkey) == 0) {
+        aos_str_set(&config->access_key_id, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("access_key_secret", pkey) == 0) {
+        aos_str_set(&config->access_key_secret, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("io_host", pkey) == 0) {
+        aos_str_set(&config->io_host, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("up_host", pkey) == 0) {
+        aos_str_set(&config->up_host, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("rs_host", pkey) == 0) {
+        aos_str_set(&config->rs_host, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("rsf_host", pkey) == 0) {
+        aos_str_set(&config->rsf_host, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("uc_host", pkey) == 0) {
+        aos_str_set(&config->uc_host, apr_pstrdup(p, valuebuff));
+    } else if (strcmp("zone", pkey) == 0) {
+        aos_str_set(&config->zone, apr_pstrdup(p, valuebuff));
+    }
+
+    return;
+}
+
+void init_application_config(aos_pool_t *p, oss_config_t *config)
+{
+    //get config from application.conf
+    FILE *fp = NULL;
+    char *pLine = NULL;
+    char line[CONF_LINE_LENGTH] = {0};
+    char thickKey[CONF_KEY_LENGTH] = {0};
+    char keybuff[CONF_KEY_LENGTH] = {0};
+    char thickValue[CONF_KEY_LENGTH] = {0};
+    char currentPath[CONF_LINE_LENGTH] = {0};
+
+    fp = fopen("application.conf", "r");
+    if (NULL == fp) {
+        getcwd(currentPath, CONF_LINE_LENGTH);
+        aos_error_log("fail to open application.conf, please make sure %s have application.conf.\r\n",
+                      currentPath);
+        return;
+    }
+
+    while (!feof(fp)) {
+        if (fgets(line, CONF_LINE_LENGTH, fp) == NULL) {  //get one line
+            break;
+        }
+
+        if ((pLine = strstr(line, "=")) == NULL) {   //this line does not contain =, continue
+            continue;
+        }
+
+        memcpy(thickKey, line, pLine - line);
+        trimeSpace(thickKey, keybuff);
+
+        pLine += 1;  // skip =
+        trimeSpace(pLine, thickValue);
+
+        init_config(p, keybuff, thickValue, config);
+
+        memset(thickKey, 0, CONF_KEY_LENGTH);
+        memset(keybuff, 0, CONF_KEY_LENGTH);
+        memset(thickValue, 0, CONF_KEY_LENGTH);
+    }
+
+    return;
+}
+
 void oss_init_request(const oss_request_options_t *options, 
                       http_method_e method,
                       aos_http_request_t **req, 
@@ -815,6 +940,76 @@ void oss_init_object_request(const oss_request_options_t *options,
     }
 
     oss_get_object_uri(options, bucket, object, *req);
+}
+
+void kodo_Encode_Bucket_To_HexString(const aos_string_t *bucket, char *pcEncString)
+{
+    int i = 0;
+    int length = bucket->len;
+    char cByte;
+    for (i = 0; i < length; i++) {
+        cByte = bucket->data[i];
+        pcEncString[i*2] = pHexTable[cByte>>4];
+        pcEncString[i*2+1] = pHexTable[cByte&0x0f];
+    }
+
+    return;
+}
+
+void kodo_init_object_request(const oss_request_options_t *options,
+                             const aos_string_t *bucket,
+                             const aos_string_t *object,
+                             http_method_e method,
+                             aos_http_request_t **req,
+                             aos_table_t *params,
+                             aos_table_t *headers,
+                             aos_http_response_t **resp)
+{
+    char   *domain      = NULL;
+    char   *baseUrl     = NULL;
+    char   *hostPrefix  = NULL;
+    char   *pcEncString = NULL;
+    char   *privateURL  = NULL;
+    int     tokenlen    = 0;
+    int     remainLen   = 0;
+    Qiniu_RS_GetPolicy getPolicy;
+    Qiniu_Mac mac;
+
+    oss_init_request(options, method, req, params, headers, resp);
+    (*resp)->progress_callback = NULL;
+
+    pcEncString = (char *)aos_palloc(options->pool, 2 * bucket->len);
+
+    kodo_Encode_Bucket_To_HexString(bucket, pcEncString);
+    domain = apr_psprintf(options->pool, "%.*s-%.*s.%.*s.%s",
+                          2 * bucket->len, pcEncString,
+                          options->config->access_key_id.len, options->config->access_key_id.data,
+                          options->config->zone.len, options->config->zone.data,
+                          "src.qbox.me");
+
+    Qiniu_Zero(getPolicy);
+    hostPrefix = starts_with(&options->config->io_host, AOS_HTTP_PREFIX) ?
+                             AOS_HTTP_PREFIX : "";
+    hostPrefix = starts_with(&options->config->io_host, AOS_HTTPS_PREFIX) ?
+                             AOS_HTTPS_PREFIX : "";
+
+    baseUrl = Qiniu_String_Concat(hostPrefix, domain, "/", object->data, NULL);
+    mac.accessKey = options->config->access_key_id.data;
+    mac.secretKey = options->config->access_key_secret.data;
+    privateURL = Qiniu_RS_GetPolicy_MakeRequest(&getPolicy, baseUrl, &mac);
+    tokenlen = strlen(hostPrefix) + strlen(domain);
+    remainLen = strlen(privateURL) - tokenlen;
+
+    (*req)->signed_url = apr_psprintf(options->pool, "%.*s%.*s",
+                                      options->config->io_host.len, options->config->io_host.data,
+                                      remainLen, privateURL + tokenlen);
+
+    apr_table_addn((*req)->headers, "host", domain);
+
+    free(baseUrl);
+    free(privateURL);
+
+    return;
 }
 
 void oss_init_live_channel_request(const oss_request_options_t *options, 

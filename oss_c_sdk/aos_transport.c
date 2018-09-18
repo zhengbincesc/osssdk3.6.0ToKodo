@@ -164,6 +164,28 @@ void aos_curl_response_headers_parse(aos_pool_t *p, aos_table_t *headers, char *
     apr_table_addn(headers, aos_pstrdup(p, &key), aos_pstrdup(p, &value));
 }
 
+void aos_transport_headers(aos_pool_t *p, const char *pkodoheader, aos_table_t **resp_headers)
+{
+    aos_table_t *headers = NULL;
+    char        *buffer  = NULL;
+
+    if ((NULL == pkodoheader) || (NULL == resp_headers)) {
+        return;
+    }
+
+    headers = aos_table_make(p, 10);
+
+    buffer = strtok((char *)pkodoheader, "\r\n");
+    while (NULL != buffer) {
+       aos_curl_response_headers_parse(p, headers, buffer, strlen(buffer));
+       buffer = strtok(NULL, "\r\n");
+    }
+
+    *resp_headers = headers;
+
+    return;
+}
+
 size_t aos_curl_default_header_callback(char *buffer, size_t size, size_t nitems, void *userdata)
 {
     int len;

@@ -83,17 +83,26 @@ IF (CURL_CONFIG_BIN)
 ELSE()
     MESSAGE(FATAL_ERROR "Could not find curl-config")
 ENDIF()
+
+EXECUTE_PROCESS(
+    COMMAND pwd
+    OUTPUT_VARIABLE CURRENT_PATH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
   
 # Compile and link lib_oss_c_sdk
 include_directories(${APR_INCLUDE_DIR})
 include_directories(${APR_UTIL_INCLUDE_DIR})
 include_directories(${MINIXML_INCLUDE_DIR})
 include_directories(${CURL_INCLUDE_DIR})
+include_directories(${CURRENT_PATH})
 
 aux_source_directory(oss_c_sdk SRC_LIST)
 
 add_library(${CMAKE_PROJECT_NAME} SHARED ${SRC_LIST})
 add_library(${CMAKE_PROJECT_NAME}_static STATIC ${SRC_LIST})
+
+target_link_libraries(${CMAKE_PROJECT_NAME} ${CURRENT_PATH}/c-sdk/libqiniu.so)
 
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES VERSION ${CMAKE_VERSION}  SOVERSION ${CMAKE_VERSION})
 
