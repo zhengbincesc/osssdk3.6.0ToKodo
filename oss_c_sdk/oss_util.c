@@ -977,13 +977,8 @@ void kodo_init_object_request(const oss_request_options_t *options,
 
     oss_init_request(options, method, req, params, headers, resp);
     (*resp)->progress_callback = NULL;
-    oss_get_object_uri(options, bucket, object, *req);
 
-    pcEncString = (char *)malloc(2 * bucket->len);
-    if (NULL == pcEncString) {
-        aos_error_log("Not enough memory, malloc fail.\r\n");
-        return;
-    }
+    pcEncString = (char *)aos_palloc(options->pool, 2 * bucket->len);
 
     kodo_Encode_Bucket_To_HexString(bucket, pcEncString);
     domain = apr_psprintf(options->pool, "%.*s-%.*s.%.*s.%s",
@@ -1011,7 +1006,6 @@ void kodo_init_object_request(const oss_request_options_t *options,
 
     apr_table_addn((*req)->headers, "host", domain);
 
-    free(pcEncString);
     free(baseUrl);
     free(privateURL);
 

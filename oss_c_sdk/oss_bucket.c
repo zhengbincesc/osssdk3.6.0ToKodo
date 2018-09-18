@@ -11,8 +11,6 @@
 #include "c-sdk/qiniu/rsf.h"
 #include "c-sdk/cJSON/cJSON.h"
 
-#define KODO_BUCKET_NOT_FOUND_CODE 612
-
 static inline int oss_str_empty(const char *s) {
     return (s == NULL) || strcmp("", s) == 0;
 }
@@ -111,6 +109,12 @@ aos_status_t *oss_create_bucket(const oss_request_options_t *options,
         aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
     }
 
+    if (err.code == KODO_BUCKET_EXIST_CODE) {
+        err.code = OSS_BUCKET_EXIST_CODE;
+        err.message = "BucketAlreadyExists";
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+    }
+
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
 
     Qiniu_Free(url);
@@ -147,10 +151,31 @@ aos_status_t *oss_delete_bucket(const oss_request_options_t *options,
     Qiniu_Error   err;
     Qiniu_Client  client;
     Qiniu_Mac     mac;
+    Qiniu_RSF_ListRet listRet;
 
     mac.accessKey = options->config->access_key_id.data;
     mac.secretKey = options->config->access_key_secret.data;
     Qiniu_Client_InitMacAuth(&client, 1024, &mac);
+
+    err = Qiniu_RSF_ListFiles(&client, &listRet, bucket->data, NULL, NULL, NULL, 1);
+    if (!aos_http_is_ok(err.code)) {
+        s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+        Qiniu_Client_Cleanup(&client);
+
+        return s;
+    }
+
+    //If bucket has objects, return 409 code
+    if (0 != listRet.itemsCount) {
+        err.code = OSS_BUCKET_NOT_EMPTY_CODE;
+        err.message = "BucketNotEmpty";
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+        s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
+        Qiniu_Client_Cleanup(&client);
+
+        return s;
+    }
+
     url = Qiniu_String_Concat3(options->config->rs_host.data, "/drop/", bucket->data);
     err = Qiniu_Client_CallNoRet(&client, url);
 
@@ -262,7 +287,7 @@ aos_status_t *oss_check_bucket(const oss_request_options_t *options,
     if (aos_http_is_ok(err.code)) {
         *pIsExist = 1;
          aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
-    } else if (KODO_BUCKET_NOT_FOUND_CODE == err.code) {
+    } else if (KODO_NOT_EXIST_CODE == err.code) {
         //If code is not found, reset code to 200
         err.code = 200;
         aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
@@ -379,6 +404,13 @@ aos_status_t *oss_get_bucket_info(const oss_request_options_t *options,
             aos_str_set(&bucket_info->owner_name, apr_pstrdup(options->pool, struid));
             aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
         }
+    }
+
+    //transfer kodo not exist code to oss not exist code
+    if (err.code == KODO_NOT_EXIST_CODE) {
+        err.code = OSS_BUCKET_NOT_EXIST_CODE;
+        err.message = "NoSuchBucket";
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
     }
 
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
@@ -548,6 +580,7 @@ aos_status_t *oss_list_object(const oss_request_options_t *options,
     limit = params->max_ret;
 
     QINIU_RSF_HOST = options->config->rsf_host.data;
+    //cesc TODO: marker transfer, we are encodeed
     err = Qiniu_RSF_ListFiles(&client, &listRet, bucket->data, prefix, delimiter, marker, limit);
 
     if (!aos_http_is_ok(err.code)) {

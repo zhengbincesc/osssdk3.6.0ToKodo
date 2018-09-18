@@ -8,6 +8,13 @@ AOS_CPP_START
 
 typedef struct aos_status_s aos_status_t;
 
+#define KODO_NOT_EXIST_CODE 612
+#define KODO_BUCKET_EXIST_CODE 614
+#define OSS_BUCKET_EXIST_CODE 409
+#define OSS_BUCKET_NOT_EMPTY_CODE 409
+#define OSS_BUCKET_NOT_EXIST_CODE 404
+#define OSS_OBJECT_NOT_EXIST_CODE 204
+
 struct aos_status_s {
     int code; // > 0 http code
     char *error_code; // can't modify

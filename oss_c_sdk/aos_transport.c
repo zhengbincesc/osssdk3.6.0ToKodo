@@ -169,7 +169,7 @@ void aos_transport_headers(aos_pool_t *p, const char *pkodoheader, aos_table_t *
     aos_table_t *headers = NULL;
     char        *buffer  = NULL;
 
-    if (NULL == resp_headers) {
+    if ((NULL == pkodoheader) || (NULL == resp_headers)) {
         return;
     }
 

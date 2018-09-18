@@ -510,6 +510,12 @@ aos_status_t *oss_delete_object(const oss_request_options_t *options,
         aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
     }
 
+    //transfer kodo not exist code to oss not exist code
+    if (err.code == KODO_NOT_EXIST_CODE) {
+        err.code = OSS_OBJECT_NOT_EXIST_CODE;
+        err.message = "NoContent";
+        aos_transport_headers(options->pool, Qiniu_Buffer_CStr(&client.respHeader), resp_headers);
+    }
     s = oss_transfer_err_to_aos(options->pool, err.code, err.message);
 
     Qiniu_Free(url);
