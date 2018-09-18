@@ -62,6 +62,7 @@ void init_sample_request_options(oss_request_options_t *options, int is_cname)
 {
     options->config = oss_config_create(options->pool);
     init_application_config(options->pool, options->config);
+    aos_str_set(&options->config->endpoint, OSS_ENDPOINT);
     options->config->is_cname = is_cname;
     options->ctl = aos_http_controller_create(options->pool, 0);
 }
