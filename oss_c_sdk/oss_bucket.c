@@ -37,6 +37,43 @@ static void oss_transfer_item_to_content(aos_pool_t *pool, const Qiniu_RSF_ListI
     return;
 }
 
+static char *oss_transfer_ossmarker_to_kodo(aos_pool_t *pool, const char *ossmarker) {
+    //kodo marker is encode({"c":0,"k":"xxx"}), oss marker is xxx
+    char *jsonMarker = NULL;
+    char *encMarker = NULL;
+    char *marker = NULL;
+
+    //ossmarker must not be empty, so just use it
+    jsonMarker = Qiniu_String_Concat3("{\"c\":0,\"k\":\"", ossmarker, "\"}");
+    encMarker = Qiniu_String_Encode(jsonMarker);
+
+    marker = apr_pstrdup(pool, encMarker);
+
+    free(jsonMarker);
+    free(encMarker);
+
+    return marker;
+}
+
+static char *oss_transfer_kodomarker_to_oss(aos_pool_t *pool, const char *kodomarker) {
+    //kodo marker is encode({"c":0,"k":"xxx"}), oss marker is xxx
+    char *jsonMarker = NULL;
+    Qiniu_Json *json = NULL;
+    const char *key = NULL;
+    char *marker = NULL;
+
+    jsonMarker = Qiniu_String_Decode(kodomarker);
+    json = cJSON_Parse(jsonMarker);
+
+    key = Qiniu_Json_GetString(json, "k", "");
+    marker = apr_pstrdup(pool, key);
+
+    free(jsonMarker);
+    cJSON_Delete(json);
+
+    return marker;
+}
+
 static aos_status_t *oss_create_bucket_with_params(const oss_request_options_t *options, 
                                                    const aos_string_t *bucket, 
                                                    oss_create_bucket_params_t *params, 
@@ -580,7 +617,9 @@ aos_status_t *oss_list_object(const oss_request_options_t *options,
     limit = params->max_ret;
 
     QINIU_RSF_HOST = options->config->rsf_host.data;
-    //cesc TODO: marker transfer, we are encodeed
+    if (!oss_str_empty(marker)) {
+        marker = oss_transfer_ossmarker_to_kodo(options->pool, params->marker.data);
+    }
     err = Qiniu_RSF_ListFiles(&client, &listRet, bucket->data, prefix, delimiter, marker, limit);
 
     if (!aos_http_is_ok(err.code)) {
@@ -592,7 +631,8 @@ aos_status_t *oss_list_object(const oss_request_options_t *options,
     params->truncated = AOS_FALSE;
     if (!oss_str_empty(listRet.marker)) {
         params->truncated = AOS_TRUE;
-        aos_str_set(&params->next_marker, apr_pstrdup(options->pool, listRet.marker));
+        marker = oss_transfer_kodomarker_to_oss(options->pool, listRet.marker);
+        aos_str_set(&params->next_marker, marker);
     }
 
     for (i = 0; i < listRet.commonPrefixesCount; i++) {
