@@ -266,6 +266,7 @@ void test_get_bucket_info(CuTest *tc)
     TEST_CASE_LOG("user id %s, name %s, \n", bucket_info.owner_id.data, bucket_info.owner_name.data);
     CuAssertTrue(tc, bucket_info.location.len != 0);
     CuAssertTrue(tc, bucket_info.acl.len != 0);
+   //qiniu don't support created_date,extranet_endpoint and intranet_endpoint
    // CuAssertTrue(tc, bucket_info.created_date.len != 0);
    // CuAssertTrue(tc, bucket_info.extranet_endpoint.len != 0);
    // CuAssertTrue(tc, bucket_info.intranet_endpoint.len != 0);
