@@ -629,6 +629,7 @@ void test_get_object_to_file(CuTest *tc)
 {
     aos_pool_t *p = NULL;
     aos_string_t bucket;
+    printf("Pls run test_put_object_from_file_with_content_type test case first to prepare test file and then modify the mintype to image/jpeg manully in bucket!!!\n");
     char *object_name = "oss_test_put_object_from_file2.txt";
     aos_string_t object;
     char *filename = "oss_test_get_object_to_file";
@@ -1126,7 +1127,7 @@ CuSuite *test_oss_object()
 
 //    SUITE_ADD_TEST(suite, test_object_setup);
 //    SUITE_ADD_TEST(suite, test_put_object_from_buffer);
-//    SUITE_ADD_TEST(suite, test_put_object_from_file);
+    SUITE_ADD_TEST(suite, test_put_object_from_file);
 //    SUITE_ADD_TEST(suite, test_put_object_from_buffer_with_specified);
 //    SUITE_ADD_TEST(suite, test_get_object_to_buffer);
 //    SUITE_ADD_TEST(suite, test_get_object_to_buffer_with_range);
@@ -1136,7 +1137,7 @@ CuSuite *test_oss_object()
 //    SUITE_ADD_TEST(suite, test_restore_obj);
 //    SUITE_ADD_TEST(suite, test_put_object_from_buffer_with_default_content_type);
 //    SUITE_ADD_TEST(suite, test_put_object_with_large_length_header);
-//    SUITE_ADD_TEST(suite, test_get_object_to_file);
+    SUITE_ADD_TEST(suite, test_get_object_to_file);
 //    SUITE_ADD_TEST(suite, test_head_object);
 //    SUITE_ADD_TEST(suite, test_head_object_with_not_exist);
 //    SUITE_ADD_TEST(suite, test_copy_object);
