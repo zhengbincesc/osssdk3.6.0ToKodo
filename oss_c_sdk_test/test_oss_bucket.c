@@ -73,6 +73,7 @@ void test_bucket_cleanup(CuTest *tc)
 
 void test_create_bucket(CuTest *tc)
 {
+    printf("Pls make sure your bucket is not exit before run this case, error code 409 means bucket is exit!\n");
     aos_pool_t *p = NULL;
     int is_cname = 0;
     aos_status_t *s = NULL;
@@ -266,7 +267,6 @@ void test_get_bucket_info(CuTest *tc)
     TEST_CASE_LOG("user id %s, name %s, \n", bucket_info.owner_id.data, bucket_info.owner_name.data);
     CuAssertTrue(tc, bucket_info.location.len != 0);
     CuAssertTrue(tc, bucket_info.acl.len != 0);
-   //qiniu don't support created_date,extranet_endpoint and intranet_endpoint
    // CuAssertTrue(tc, bucket_info.created_date.len != 0);
    // CuAssertTrue(tc, bucket_info.extranet_endpoint.len != 0);
    // CuAssertTrue(tc, bucket_info.intranet_endpoint.len != 0);
@@ -1348,11 +1348,11 @@ CuSuite *test_oss_bucket()
     CuSuite* suite = CuSuiteNew();
 
 //    SUITE_ADD_TEST(suite, test_bucket_setup);
-//    SUITE_ADD_TEST(suite, test_create_bucket);
-//    SUITE_ADD_TEST(suite, test_get_bucket_info);
+    SUITE_ADD_TEST(suite, test_create_bucket);
+    SUITE_ADD_TEST(suite, test_get_bucket_info);
 //    SUITE_ADD_TEST(suite, test_get_bucket_stat);
-//    SUITE_ADD_TEST(suite, test_put_bucket_website);
-//    SUITE_ADD_TEST(suite, test_get_bucket_website);
+    SUITE_ADD_TEST(suite, test_put_bucket_website);
+    SUITE_ADD_TEST(suite, test_get_bucket_website);
 //    SUITE_ADD_TEST(suite, test_delete_bucket_website);
 //    SUITE_ADD_TEST(suite, test_put_bucket_referer);
  //   SUITE_ADD_TEST(suite, test_get_bucket_referer);
@@ -1366,13 +1366,13 @@ CuSuite *test_oss_bucket()
     //SUITE_ADD_TEST(suite, test_head_bucket);
 //    SUITE_ADD_TEST(suite, test_put_bucket_storage_capacity);
 //    SUITE_ADD_TEST(suite, test_get_bucket_storage_capacity);
-//    SUITE_ADD_TEST(suite, test_list_buckets);
+    SUITE_ADD_TEST(suite, test_list_buckets);
 //    SUITE_ADD_TEST(suite, test_list_buckets_with_invalid_prefix);
 //    SUITE_ADD_TEST(suite, test_list_buckets_with_iterator);
-//    SUITE_ADD_TEST(suite, test_put_bucket_acl);
-//    SUITE_ADD_TEST(suite, test_get_bucket_acl);
+    SUITE_ADD_TEST(suite, test_put_bucket_acl);
+    SUITE_ADD_TEST(suite, test_get_bucket_acl);
 //   SUITE_ADD_TEST(suite, test_delete_objects_by_prefix);
-//    SUITE_ADD_TEST(suite, test_list_object);
+    SUITE_ADD_TEST(suite, test_list_object);
 //    SUITE_ADD_TEST(suite, test_list_object_with_delimiter);
     SUITE_ADD_TEST(suite, test_delete_bucket);
 //    SUITE_ADD_TEST(suite, test_lifecycle);

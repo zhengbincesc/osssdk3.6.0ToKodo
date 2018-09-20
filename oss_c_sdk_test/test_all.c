@@ -27,7 +27,7 @@ static const struct testlist {
 } tests[] = {
     {"test_oss_bucket", test_oss_bucket},
     {"test_oss_object", test_oss_object},
-    {"test_oss_multipart", test_oss_multipart},
+/*    {"test_oss_multipart", test_oss_multipart},
     {"test_oss_live", test_oss_live},
     {"test_oss_image", test_oss_image},
     {"test_oss_progress", test_oss_progress},
@@ -35,7 +35,7 @@ static const struct testlist {
     {"test_oss_crc", test_oss_crc},
     {"test_oss_proxy", test_oss_proxy},
     {"test_oss_resumable", test_oss_resumable},
-    {"test_aos", test_aos},
+    {"test_aos", test_aos}, */
     {"LastTest", NULL}
 };
 
